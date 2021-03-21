@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <winternl.h>
 #include <Dbghelp.h>
+#include <cstdlib>
 
 #pragma comment(lib,"Dbghelp.lib")
 #pragma comment(lib,"Ntdll.lib")
@@ -90,7 +91,7 @@ bool SystemThreading::tSymbol::resolve(uintptr_t address)
 {
    static bool isSymInitiate = false;
    if (!isSymInitiate) {
-      if (!SymInitialize(GetCurrentProcess(), NULL, TRUE)) {
+      if (!SymInitialize(GetCurrentProcess(), std::getenv("PATH"), TRUE)) {
          printf("Issue with SymInitialize ! %d\n", ::GetLastError());
       }
       isSymInitiate = true;

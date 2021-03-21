@@ -59,19 +59,17 @@ namespace sat {
       virtual ~ThreadStackTracker() override { }
 
    public:
-      friend StackBeacon;
       StackBeacon* stackBeaconsBase[cThreadMaxStackBeacons];
       StackBeacon** stackBeacons;
       uint64_t stackLastId;
 
    private:
-      friend Thread;
       sat::Thread* thread;
       StackFrame* lastStack;
 
-   private:
       static const int reserve_batchSize = 512;
       StackFrame* _reserve;
+
       StackFrame* allocFrame() {
          StackFrame* frame = this->allocFrameBatch();
          this->_reserve = frame->next;

@@ -6,9 +6,9 @@
 // kSpinLockHeld represents the locked state with no waiters
 // kSpinLockSleeper represents the locked state with waiters
 
-static int adaptive_spin_count = 0;
+static uint32_t adaptive_spin_count = 0;
 
-static int SuggestedDelayNS(int loop);
+static uint32_t SuggestedDelayNS(uint32_t loop);
 
 /*******************************************************
 **** FOR _WIN32
@@ -21,7 +21,8 @@ void sat::SpinLock::SpinlockWait(volatile tSpinWord *w, int32_t value, int loop)
    } else if (loop == 1) {
       Sleep(0);
    } else {
-      Sleep(SuggestedDelayNS(loop) / 1000000);
+      auto delay = SuggestedDelayNS(loop) / 1000000;
+      Sleep(delay);
    }
 }
 void sat::SpinLock::SpinlockWake(volatile tSpinWord *w) {
@@ -136,7 +137,7 @@ void sat::SpinLock::slowLock() {
       //   Monitor the lock to see if its value changes within some time
       //   period (adaptive_spin_count loop iterations). The last value read
       //   from the lock is returned from the method.
-      int c = adaptive_spin_count;
+      uint32_t c = adaptive_spin_count;
       while (lockword_.load() != kSpinLockFree && --c > 0) {
          SpinlockPause();
       }
@@ -177,7 +178,7 @@ void sat::SpinLock::slowUnlock() {
 }
 
 // Return a suggested delay in nanoseconds for iteration number "loop"
-static int SuggestedDelayNS(int loop) {
+static uint32_t SuggestedDelayNS(uint32_t loop) {
    // Weak pseudo-random number generator to get some spread between threads
    // when many are spinning.
 #ifdef BASE_HAS_ATOMIC64

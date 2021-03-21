@@ -6,11 +6,7 @@
 namespace sat {
 
    //-----------------------------------------------------------------------------
-   //-----------------------------------------------------------------------------
-   //
    // Stack Marker: define the sealed shape of a stack beacon
-   // 
-   //-----------------------------------------------------------------------------
    //-----------------------------------------------------------------------------
 
    struct IStackMarker {
@@ -48,49 +44,26 @@ namespace sat {
    static_assert(sizeof(StackMarker) == 4 * sizeof(uint64_t), "StackMarker size invalid");
 
    //-----------------------------------------------------------------------------
-   //-----------------------------------------------------------------------------
-   //
    // Stack Beacon: define a frame of a metadata stack, allocated on the call stack
-   // 
-   //-----------------------------------------------------------------------------
    //-----------------------------------------------------------------------------
 
-   struct StackBeacon {
+   struct SAT_API StackBeacon {
       uint64_t beaconId;
+      virtual void begin() final;
+      virtual void end() final;
       virtual bool isSpan() { return false; }
       virtual void createrMarker(StackMarker& buffer) = 0;
    };
 
-   template<class StackBeaconT>
-   struct StackBeaconHolder {
-      bool isDeployed;
-      StackBeaconT beacon;
-      StackBeaconHolder() {
-         this->isDeployed = false;
-      }
-      ~StackBeaconHolder() {
-         this->remove();
-      }
-      void deploy() {
-         if (!this->isDeployed) {
-            sat_begin_stack_beacon(&this->beacon);
-            this->isDeployed = true;
-         }
-      }
-      void remove() {
-         if (this->isDeployed) {
-            sat_end_stack_beacon(&this->beacon);
-            this->isDeployed = false;
-         }
-      }
+   class StackBeaconHolder {
+      StackBeacon& beacon;
+   public:
+      StackBeaconHolder(StackBeacon& beacon) :beacon(beacon) { beacon.begin(); }
+      ~StackBeaconHolder() { beacon.end(); }
    };
 
    //-----------------------------------------------------------------------------
-   //-----------------------------------------------------------------------------
-   //
    // Stack profiling
-   // 
-   //-----------------------------------------------------------------------------
    //-----------------------------------------------------------------------------
 
    template <class tData>
@@ -133,10 +106,6 @@ namespace sat {
       SAT_API IStackProfiler* createStackProfiler(Thread* thread);
       SAT_API void traverseStack(uint64_t stackstamp, IStackVisitor* visitor);
       SAT_API uint64_t getCurrentStackStamp();
+      SAT_API void printStackStamp(uint64_t stackstamp);
    }
 }
-
-// Stack marking API
-extern"C" SAT_API void sat_begin_stack_beacon(sat::StackBeacon * beacon);
-extern"C" SAT_API void sat_end_stack_beacon(sat::StackBeacon * beacon);
-extern"C" SAT_API void sat_print_stackstamp(uint64_t stackstamp);
