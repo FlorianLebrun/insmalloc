@@ -16,6 +16,7 @@ namespace sat {
    struct BaseHeap : Heap {
       AllocatorSizeMapping<false> sizeMapping;
       AllocatorSizeMapping<true> sizeMappingWithMeta;
+      bool useOverflowProtection = 0;
       int heapID;
 
       virtual ~BaseHeap() = 0;

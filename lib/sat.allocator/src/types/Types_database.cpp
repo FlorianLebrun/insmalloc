@@ -100,12 +100,12 @@ struct TypesDataHeap : SystemObject<Heap>::Derived<TypesDataHeap> {
   }
 } g_typesDataheap;
 
-static struct TypesDataBase : sat::ITypesController {
+static struct TypesDataBase : sat::TypesController {
 
   virtual TypeDef getType(TypeDefID typeID) override;
   virtual TypeDefID getTypeID(TypeDef typ) override;
 
-  virtual TypeDef allocTypeDef(uint32_t length) override;
+  virtual TypeDef allocTypeDef(ITypeHandle* handle, uint32_t nrefs) override;
 
   virtual void* alloc(int size);
   virtual void free(void* ptr);
@@ -116,7 +116,7 @@ void sat::TypesDataBase_init() {
   g_typesDataheap.init();
 }
 
-sat::ITypesController* sat_get_types_controller() {
+sat::TypesController* sat_get_types_controller() {
   return &g_typesDatabase;
 }
 
@@ -127,9 +127,7 @@ void* TypesDataBase::alloc(int size) {
 void TypesDataBase::free(void* ptr) {
 }
 
-
-TypeDef TypesDataBase::getType(TypeDefID typeID)
-{
+TypeDef TypesDataBase::getType(TypeDefID typeID) {
   uintptr_t pageIndex = typeID>>sat::memory::cSegmentSizeL2;
   if(typeID > 0 && pageIndex < g_typesDataheap.length) {
     return TypeDef(typeID + ::sat_types_base);
@@ -137,15 +135,19 @@ TypeDef TypesDataBase::getType(TypeDefID typeID)
   return 0;
 }
 
-TypeDefID TypesDataBase::getTypeID(TypeDef typ)
-{
+TypeDefID TypesDataBase::getTypeID(TypeDef typ) {
   return uintptr_t(typ) - sat_types_base;
 }
 
-TypeDef TypesDataBase::allocTypeDef(uint32_t length) {
+TypeDef TypesDataBase::allocTypeDef(ITypeHandle* handle, uint32_t nrefs) {
+   int length = sizeof(tTypeDef) + nrefs * sizeof(uint32_t);
   assert(length >= sizeof(tTypeDef) && length < 16834);
   TypeDef typ = (TypeDef)TypesDataBase::alloc(length);
   memset(typ, 0, length);
   typ->length = length;
+  typ->handle = handle;
+  typ->nrefs = nrefs;
+  memset(typ->refs, 0, nrefs * sizeof(uint32_t));
   return typ;
 }
+

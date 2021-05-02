@@ -30,16 +30,15 @@ size_t BaseHeap::getAllocatedSizeWithMeta(size_t size) {
    return this->sizeMappingWithMeta.getAllocator(size)->getAllocatedSizeWithMeta(size);
 }
 
-#define UseOverflowProtection 1
-
-void* BaseHeap::allocate(size_t size)
-{
-#if UseOverflowProtection
-   void* ptr = this->allocateWithMeta(size, 0);
-#else
-   sat::ObjectAllocator* allocator = this->sizeMapping.getAllocator(size);
-   void* ptr = allocator->allocate(size);
-#endif
+void* BaseHeap::allocate(size_t size) {
+   void* ptr;
+   if (this->useOverflowProtection) {
+      ptr = this->allocateWithMeta(size, 0);
+   }
+   else {
+      sat::ObjectAllocator* allocator = this->sizeMapping.getAllocator(size);
+      ptr = allocator->allocate(size);
+   }
 
 #ifdef _DEBUG
    SAT_DEBUG_CHECK(sat::tObjectInfos infos);
@@ -51,36 +50,37 @@ void* BaseHeap::allocate(size_t size)
    return ptr;
 }
 
-void* BaseHeap::allocateWithMeta(size_t size, uint64_t meta)
-{
-#if UseOverflowProtection
-   static const size_t paddingMinSize = 8;
-   size_t allocatedSize = size + paddingMinSize + sizeof(tObjectStamp);
-   meta |= tObjectMetaData::cIsOverflowProtected_Bit | tObjectMetaData::cIsStamped_Bit;
+void* BaseHeap::allocateWithMeta(size_t size, uint64_t meta) {
+   void* ptr;
+   if (this->useOverflowProtection) {
+      static const size_t paddingMinSize = 8;
+      size_t allocatedSize = size + paddingMinSize + sizeof(tObjectStamp);
+      meta |= tObjectMetaData::cIsOverflowProtected_Bit | tObjectMetaData::cIsStamped_Bit;
 
-   // Allocate buffer
-   sat::ObjectAllocator* allocator = this->sizeMappingWithMeta.getAllocator(allocatedSize);
-   void* ptr = allocator->allocateWithMeta(allocatedSize, meta);
+      // Allocate buffer
+      sat::ObjectAllocator* allocator = this->sizeMappingWithMeta.getAllocator(allocatedSize);
+      ptr = allocator->allocateWithMeta(allocatedSize, meta);
 
-   // Prepare buffer tail
-   {
-      allocatedSize = allocator->getAllocatedSizeWithMeta(allocatedSize);
+      // Prepare buffer tail
+      {
+         allocatedSize = allocator->getAllocatedSizeWithMeta(allocatedSize);
 
-      // Write stamp
-      tpObjectStamp stamp = tpObjectStamp(((uint8_t*)ptr) + allocatedSize - sizeof(tObjectStamp));
-      stamp->stackstamp = 0;// Thread::current()->getStackStamp();
-      stamp->timestamp = sat::timing::getCurrentTimestamp();
+         // Write stamp
+         tpObjectStamp stamp = tpObjectStamp(((uint8_t*)ptr) + allocatedSize - sizeof(tObjectStamp));
+         stamp->stackstamp = 0;// Thread::current()->getStackStamp();
+         stamp->timestamp = sat::timing::getCurrentTimestamp();
 
-      // Write overflow detection bytes
-      uint32_t& bufferSize = *(uint32_t*)(((uint8_t*)ptr) + allocatedSize - sizeof(uint32_t) - sizeof(tObjectStamp));
-      bufferSize = size ^ 0xabababab;
-      uint8_t* paddingBytes = ((uint8_t*)ptr) + size;
-      memset(paddingBytes, 0xab, allocatedSize - size - sizeof(uint32_t) - sizeof(tObjectStamp));
+         // Write overflow detection bytes
+         uint32_t& bufferSize = *(uint32_t*)(((uint8_t*)ptr) + allocatedSize - sizeof(uint32_t) - sizeof(tObjectStamp));
+         bufferSize = size ^ 0xabababab;
+         uint8_t* paddingBytes = ((uint8_t*)ptr) + size;
+         memset(paddingBytes, 0xab, allocatedSize - size - sizeof(uint32_t) - sizeof(tObjectStamp));
+      }
    }
-#else
-   sat::ObjectAllocator* allocator = this->sizeMappingWithMeta.getAllocator(size);
-   void* ptr = allocator->allocateWithMeta(size, meta);
-#endif
+   else {
+      sat::ObjectAllocator* allocator = this->sizeMappingWithMeta.getAllocator(size);
+      ptr = allocator->allocateWithMeta(size, meta);
+   }
 
 #ifdef _DEBUG
    SAT_DEBUG_CHECK(sat::tObjectInfos infos);

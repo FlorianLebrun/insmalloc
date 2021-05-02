@@ -11,10 +11,10 @@ extern void test_stack_analysis();
 int main() {
    //sat_patch_default_allocator();
 
-   test_buffer_alloc();
-   test_meta_alloc();
-   test_perf_alloc();
-   //test_types_alloc();
+   //test_buffer_alloc();
+   //test_meta_alloc();
+   //test_perf_alloc();
+   test_types_alloc();
    //test_btree();
 
    fflush(stdout);
