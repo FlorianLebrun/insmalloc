@@ -5,7 +5,7 @@ using namespace sat;
 
 uintptr_t sat_types_base = 0;
 
-struct TypesDataHeap : SystemObject<Heap>::Derived<TypesDataHeap> {
+struct TypesDataHeap : public SystemObject<Heap>::Derived<TypesDataHeap>, public MemorySegmentController {
   ZonedBuddyAllocator::Global::Cache l_typesGlobal;
   ZonedBuddyAllocator::Local::Cache l_typesLocal;
 
@@ -20,13 +20,13 @@ struct TypesDataHeap : SystemObject<Heap>::Derived<TypesDataHeap> {
   void init() {
     this->length = 0;
     this->reserved = 4096;
-    this->index = sat::memory::table->reserveMemory(4096, 4096);
+    this->index = sat::MemoryTableController::self.reserveMemory(4096, 4096);
     for (uintptr_t i = 0; i < this->reserved; i++) {
-      sat::memory::table->entries[this->index + i].id = sat::tTechEntryID::TYPES_DATABASE;
+      sat::MemoryTableController::set(this->index + i, this);
     }
 
-    this->l_typesGlobal.init(&g_typesDataheap, sat::tTechEntryID::TYPES_DATABASE);
-    this->l_typesLocal.init(&this->l_typesGlobal);
+    this->l_typesGlobal.init(&g_typesDataheap);
+    this->l_typesLocal.init(this, &this->l_typesGlobal);
 
     sat_types_base = this->index << sat::memory::cSegmentSizeL2;
   }
@@ -72,6 +72,9 @@ struct TypesDataHeap : SystemObject<Heap>::Derived<TypesDataHeap> {
   virtual size_t getSize() {
     return this->memoryUse;
   }
+  virtual uintptr_t acquireSlot(void* value) { return 0; }
+  virtual void* getSlot(uintptr_t slotId) { return 0; }
+  virtual void setSlot(uintptr_t slotId, void* value) { return ; }
   virtual uintptr_t acquirePages(size_t size) override
   {
     uintptr_t index = 0;
@@ -86,7 +89,7 @@ struct TypesDataHeap : SystemObject<Heap>::Derived<TypesDataHeap> {
     // Initialize the page
     if (index) {
       this->memoryUse += sat::memory::cSegmentSize;
-      sat::memory::table->commitMemory(index, 1);
+      sat::MemoryTableController::self.commitMemory(index, 1);
       return index;
     }
     return 0;

@@ -82,4 +82,8 @@ namespace sat {
       }
    } *tpObjectInfos;
 
+   struct IObjectVisitor {
+      virtual bool visit(tpObjectInfos obj) = 0;
+   };
+
 }

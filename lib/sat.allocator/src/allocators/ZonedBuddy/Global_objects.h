@@ -175,7 +175,7 @@ namespace ZonedBuddyAllocator {
             this->lock.unlock();
             return tObjectList<Object>::empty();
          }
-         size_t releaseObject(SATEntry entry, Object obj, int index, uintptr_t ptr) {
+         size_t releaseObject(ZonedBuddySegment* entry, Object obj, int index, uintptr_t ptr) {
 
             // Retag as FREE
             obj->status = STATUS_FREE(sizeID);

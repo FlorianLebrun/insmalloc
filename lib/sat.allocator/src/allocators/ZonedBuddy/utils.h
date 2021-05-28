@@ -269,19 +269,19 @@ namespace ZonedBuddyAllocator {
 
    template<int sizeID, uint64_t value>
    struct WriteTags {
-      static int apply(SATEntry entry, int index) { (*(uint8_t*)&entry->tags[index &= 0xf]) = value; return index; }
+      static int apply(ZonedBuddySegment* entry, int index) { (*(uint8_t*)&entry->tags[index &= 0xf]) = value; return index; }
    };
    template<uint64_t value>
    struct WriteTags<2, value> {
-      static int apply(SATEntry entry, int index) { (*(uint16_t*)&entry->tags[index &= 0xe]) = value | (value << 8); return index; }
+      static int apply(ZonedBuddySegment* entry, int index) { (*(uint16_t*)&entry->tags[index &= 0xe]) = value | (value << 8); return index; }
    };
    template<uint64_t value>
    struct WriteTags<1, value> {
-      static int apply(SATEntry entry, int index) { (*(uint32_t*)&entry->tags[index &= 0xc]) = value | (value << 8) | (value << 16) | (value << 24); return index; }
+      static int apply(ZonedBuddySegment* entry, int index) { (*(uint32_t*)&entry->tags[index &= 0xc]) = value | (value << 8) | (value << 16) | (value << 24); return index; }
    };
    template<uint64_t value>
    struct WriteTags<0, value> {
-      static int apply(SATEntry entry, int index) { (*(uint64_t*)&entry->tags[index &= 0x8]) = value | (value << 8) | (value << 16) | (value << 24) | (value << 32) | (value << 40) | (value << 48) | (value << 56); return index; }
+      static int apply(ZonedBuddySegment* entry, int index) { (*(uint64_t*)&entry->tags[index &= 0x8]) = value | (value << 8) | (value << 16) | (value << 24) | (value << 32) | (value << 40) | (value << 48) | (value << 56); return index; }
    };
 
    struct SizeMapping {

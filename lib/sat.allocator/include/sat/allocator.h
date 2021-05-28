@@ -2,17 +2,13 @@
 #include <sat/system-object.hpp>
 #include <sat/memory.hpp>
 #include <sat/thread.hpp>
-#include "./objects_types.h"
-#include "./objects_infos.h"
+#include <sat/objects_types.h>
+#include <sat/objects_infos.h>
 
 namespace sat {
 
    enum class tHeapType {
       COMPACT_HEAP_TYPE,
-   };
-
-   struct IObjectVisitor {
-      virtual bool visit(tpObjectInfos obj) = 0;
    };
 
    struct ObjectAllocator {
@@ -37,6 +33,11 @@ namespace sat {
       // Allocation
       virtual uintptr_t acquirePages(size_t size) = 0;
       virtual void releasePages(uintptr_t index, size_t size) = 0;
+
+      // Generic slots
+      virtual uintptr_t acquireSlot(void* value) = 0;
+      virtual void* getSlot(uintptr_t slotId) = 0;
+      virtual void setSlot(uintptr_t slotId, void* value) = 0;
    };
 
    struct Controller {
@@ -75,5 +76,4 @@ extern"C" SAT_API void sat_flush_cache();
 // Reflexion API
 extern"C" SAT_API sat::Controller* sat_get_contoller();
 
-extern"C" SAT_API bool sat_has_address(void* ptr);
 extern"C" SAT_API bool sat_get_address_infos(void* ptr, sat::tpObjectInfos infos = 0);

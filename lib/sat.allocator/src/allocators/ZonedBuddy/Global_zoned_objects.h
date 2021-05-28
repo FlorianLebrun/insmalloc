@@ -166,7 +166,7 @@ namespace ZonedBuddyAllocator {
             this->lock.unlock();
             return tObjectList<Object>::empty();
          }
-         int freeObject(SATEntry entry, Zone zone, uintptr_t ptr) {
+         int freeObject(ZonedBuddySegment* entry, Zone zone, uintptr_t ptr) {
             // Find object
             uintptr_t offset = ptr & TBaseCache::objectOffsetMask;
             uintptr_t index = (offset - sizeof(tZone)) / subObjectSize;
@@ -179,7 +179,7 @@ namespace ZonedBuddyAllocator {
             this->releaseObjects(tObjectList<ZoneObject>(obj));
             return this->subObjectSize;
          }
-         void markObject(SATEntry entry, Zone zone, uintptr_t ptr) {
+         void markObject(ZonedBuddySegment* entry, Zone zone, uintptr_t ptr) {
             // Find object
             uintptr_t offset = ptr & TBaseCache::objectOffsetMask;
             uintptr_t index = (offset - sizeof(tZone)) / subObjectSize;
@@ -225,7 +225,7 @@ namespace ZonedBuddyAllocator {
             this->zone_cache_14.init(this);
             this->zone_cache_15.init(this);
          }
-         int freeObject(SATEntry entry, int index, uintptr_t ptr)
+         int freeObject(ZonedBuddySegment* entry, int index, uintptr_t ptr)
          {
             // Find object address
             const Object obj = Object(ptr & objectPtrMask);
@@ -253,7 +253,7 @@ namespace ZonedBuddyAllocator {
             }
             throw std::exception("Cannot free a not allocated object");
          }
-         void markObject(SATEntry entry, int index, uintptr_t ptr)
+         void markObject(ZonedBuddySegment* entry, int index, uintptr_t ptr)
          {
             // Find object address
             const Object obj = Object(ptr & objectPtrMask);

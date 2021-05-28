@@ -6,21 +6,6 @@
 
 namespace sat {
 
-   struct tTechEntryID {
-      enum _ {
-         PROFILING_SEGMENT = memory::tEntryID::__FIRST_TECHNICAL_SEGMENT + 1,
-      };
-   };
-
-   struct tProfilingSegmentEntry {
-      uint8_t id; // = PROFILING_SEGMENT
-      uint64_t profilingID; // Number representing the profiling
-      void set(uint64_t profilingID = 0) {
-         this->id = tTechEntryID::PROFILING_SEGMENT;
-         this->profilingID = profilingID;
-      }
-   };
-
    template <class tData>
    class StackTree {
    public:
@@ -36,15 +21,16 @@ namespace sat {
       } *Node;
 
       tNode root;
+      MemorySegmentController* controller;
 
-      StackTree(uintptr_t firstSegmentBuffer = 0) {
+      StackTree(MemorySegmentController* controller, uintptr_t firstSegmentBuffer = 0) : controller(controller) {
 
          // Init allocator
          if (firstSegmentBuffer) {
             firstSegmentBuffer = alignX(8, firstSegmentBuffer);
             this->buffer_base = (char*)firstSegmentBuffer;
             this->buffer_size = sat::memory::cSegmentSize - (firstSegmentBuffer & sat::memory::cSegmentOffsetMask);
-            memory::table->get<tProfilingSegmentEntry>(firstSegmentBuffer >> sat::memory::cSegmentSizeL2)->set(uintptr_t(this));
+            sat::MemoryTableController::set<>(firstSegmentBuffer >> sat::memory::cSegmentSizeL2, this->controller);
          }
          else {
             this->buffer_base = 0;
@@ -110,8 +96,8 @@ namespace sat {
          char* ptr;
          this->buffer_lock.lock();
          if (this->buffer_size < size) {
-            uintptr_t index = memory::table->allocSegmentSpan(1);
-            sat::memory::table->get<tProfilingSegmentEntry>(index)->set(uintptr_t(this));
+            uintptr_t index = sat::MemoryTableController::self.allocSegmentSpan(1);
+            sat::MemoryTableController::set<>(index, this->controller);
             ptr = (char*)(index << sat::memory::cSegmentSizeL2);
             this->buffer_base = ptr + size;
             this->buffer_size = sat::memory::cSegmentSize - size;
@@ -126,10 +112,11 @@ namespace sat {
       }
    };
 
-   struct StackStampDatabase {
+   struct StackStampDatabase : public MemorySegmentController {
       struct tData { };
       StackTree<tData> stacktree;
       static StackStampDatabase* create();
+      virtual const char* getName() override;
       void traverseStack(uint64_t stackstamp, IStackVisitor* visitor);
    private:
       StackStampDatabase(uintptr_t firstSegmentBuffer = 0);

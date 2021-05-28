@@ -7,42 +7,20 @@
 #include <algorithm>
 #include <string>
 
-sat::memory::MemoryTable* sat::memory::table = 0;
-static sat::SegmentsAllocator segments_allocator;
-static sat::PooledBuffers64 system_allocator;
+using namespace sat;
 
-sat::memory::MemoryTable::MemoryTable(uintptr_t size, uintptr_t limit) {
-   memset(this, 0xff, size);
+MemoryTableEntry* MemoryTableController::table = 0;
+MemoryTableController MemoryTableController::self;
 
-   // Initialize the segment table
-   this->descriptor.id = sat::memory::tEntryID::FORBIDDEN;
-   this->descriptor.bytesPerSegmentL2 = sat::memory::cSegmentSizeL2;
-   this->descriptor.bytesPerAddress = sizeof(uintptr_t);
-   this->descriptor.limit = limit;
-   this->descriptor.length = limit;
+static SegmentsAllocator segments_allocator;
+static PooledBuffers64Controller system_allocator;
 
-   // Mark the Forbidden zone
-   for (uintptr_t i = 1; i < sat::memory::cSegmentMinIndex; i++) {
-      this->entries[i].forbidden.set();
-   }
-
-   // Mark the sat with itself
-   uintptr_t SATIndex = uintptr_t(this) >> sat::memory::cSegmentSizeL2;
-   uintptr_t SATSize = size >> sat::memory::cSegmentSizeL2;
-   for (uintptr_t i = 0; i < SATSize; i++) {
-      this->entries[SATIndex + i].SATSegment.set();
-   }
-
-   // Mark free pages
-   segments_allocator.appendSegments(sat::memory::cSegmentMinIndex, SATIndex - sat::memory::cSegmentMinIndex);
-   segments_allocator.appendSegments(SATIndex + SATSize, limit - SATIndex - SATSize);
-
-   // Allocate buffer 64
-   system_allocator.initialize(this);
+const char* MemoryTableController::getName() {
+   return "SAT";
 }
 
-void sat::memory::MemoryTable::initialize() {
-   if (sat::memory::table) {
+void MemoryTableController::initialize() {
+   if (this->table) {
       printf("sat allocator is initalized more than once.");
       return;
    }
@@ -56,32 +34,55 @@ void sat::memory::MemoryTable::initialize() {
       memoryLimit = std::min<uintptr_t>(uintptr_t(10000000000), memoryLimit);
    }
 
-   uintptr_t size = alignX<intptr_t>(sizeof(sat::memory::tEntry) * (memoryLimit >> sat::memory::cSegmentSizeL2), sat::memory::cSegmentSize);
-   uintptr_t limit = size / sizeof(sat::memory::tEntry);
-
    // Check memory page size
    if (sat::memory::cSegmentSize < SystemMemory::GetPageSize()) {
       throw std::exception("sat allocator cannot work with the current system memory page size");
    }
 
+   // Initialize the table sizeings
+   uintptr_t size = alignX<intptr_t>(sizeof(MemoryTableEntry) * (memoryLimit >> sat::memory::cSegmentSizeL2), sat::memory::cSegmentSize);
+   this->limit = size / sizeof(MemoryTableEntry);
+   this->length = this->limit;
+   this->bytesPerSegmentL2 = sat::memory::cSegmentSizeL2;
+   this->bytesPerAddress = sizeof(uintptr_t);
+
    // Create the table
-   sat::memory::table = (MemoryTable*)SystemMemory::AllocBuffer(sat::memory::cSegmentMinAddress, memoryLimit, size, sat::memory::cSegmentSize);
-   sat::memory::table->MemoryTable::MemoryTable(size, limit);
+   this->table = (MemoryTableEntry*)SystemMemory::AllocBuffer(sat::memory::cSegmentMinAddress, memoryLimit, size, sat::memory::cSegmentSize);
+   memset(this->table, 0xff, size);
+
+   // Mark the Forbidden zone
+   for (uintptr_t i = 0; i < sat::memory::cSegmentMinIndex; i++) {
+      this->table[i] = &ForbiddenSegmentController::self;
+   }
+
+   // Mark the sat with itself
+   uintptr_t SATIndex = uintptr_t(this->table) >> sat::memory::cSegmentSizeL2;
+   uintptr_t SATSize = size >> sat::memory::cSegmentSizeL2;
+   for (uintptr_t i = 0; i < SATSize; i++) {
+      this->table[SATIndex + i] = &MemoryTableController::self;
+   }
+
+   // Mark free pages
+   segments_allocator.appendSegments(sat::memory::cSegmentMinIndex, SATIndex - sat::memory::cSegmentMinIndex);
+   segments_allocator.appendSegments(SATIndex + SATSize, this->limit - SATIndex - SATSize);
+
+   // Allocate buffer 64
+   system_allocator.initialize();
 }
 
-uintptr_t sat::memory::MemoryTable::allocSegmentSpan(uintptr_t size) {
+uintptr_t MemoryTableController::allocSegmentSpan(uintptr_t size) {
    uintptr_t index = segments_allocator.allocSegments(size, 1);
    this->commitMemory(index, size);
    return index;
 }
 
-void sat::memory::MemoryTable::freeSegmentSpan(uintptr_t index, uintptr_t size) {
+void MemoryTableController::freeSegmentSpan(uintptr_t index, uintptr_t size) {
    _ASSERT(size > 0);
    this->decommitMemory(index, size);
    segments_allocator.freeSegments(index, size);
 }
 
-void sat::memory::MemoryTable::commitMemory(uintptr_t index, uintptr_t size) {
+void MemoryTableController::commitMemory(uintptr_t index, uintptr_t size) {
    uintptr_t ptr = index << sat::memory::cSegmentSizeL2;
 
    // Commit the segment memory
@@ -92,7 +93,7 @@ void sat::memory::MemoryTable::commitMemory(uintptr_t index, uintptr_t size) {
 
 }
 
-void sat::memory::MemoryTable::decommitMemory(uintptr_t index, uintptr_t size) {
+void MemoryTableController::decommitMemory(uintptr_t index, uintptr_t size) {
    uintptr_t ptr = index << sat::memory::cSegmentSizeL2;
 
    // Commit the segment memory
@@ -101,7 +102,7 @@ void sat::memory::MemoryTable::decommitMemory(uintptr_t index, uintptr_t size) {
    }
 }
 
-uintptr_t sat::memory::MemoryTable::reserveMemory(uintptr_t size, uintptr_t alignL2) {
+uintptr_t MemoryTableController::reserveMemory(uintptr_t size, uintptr_t alignL2) {
    return segments_allocator.allocSegments(size, alignL2);
 }
 
@@ -120,28 +121,45 @@ void sat::memory::freeSystemBuffer(void* ptr, sizeID_t sizeID) {
 
 static uintptr_t SATEntryToString(uintptr_t index, char* out) {
    using namespace sat::memory;
-   auto& entry = table->entries[index];
-   std::string name;
+   auto& entry = MemoryTableController::table[index];
    uintptr_t len;
-   for (len = 0; (index + len) < sat::memory::table->entries->SATDescriptor.length && sat::memory::table->entries[index + len].id == entry.id; len++);
-   switch (entry.id) {
-   case tEntryID::SAT_SEGMENT: name = "SAT_SEGMENT"; break;
-   case tEntryID::FREE: name = "FREE"; break;
-   case tEntryID::FORBIDDEN: name = "FORBIDDEN"; break;
-   case tEntryID::SYSTEM_BUFFER_PAGE: name = "SYSTEM_BUFFER_PAGE"; break;
-   default: name = "<user.specific>"; break;
-   }
+   for (len = 0; (index + len) < MemoryTableController::self.length && MemoryTableController::table[index + len] == entry; len++);
+   std::string name = entry->getName();
    sprintf_s(out, 512, "[ %.5d to %.5d ] %s", uint32_t(index), uint32_t(index + len - 1), name.c_str());
    return len;
 }
 
-void sat::memory::MemoryTable::printSegments() {
+void MemoryTableController::printSegments() {
    char bout[512];
    uintptr_t i = 0;
    std::string name;
    printf("\nSegment Allocation Table:\n");
-   while (i < sat::memory::table->descriptor.length) {
+   while (i < MemoryTableController::self.length) {
       i += SATEntryToString(i, bout);
       printf("%s\n", bout);
    }
 }
+
+int MemorySegmentController::free(uintptr_t index, uintptr_t ptr) {
+   printf("Cannot free ptr in '%s'\n", this->getName());
+   return 0;
+}
+
+FreeSegmentController FreeSegmentController::self;
+
+const char* FreeSegmentController::getName() {
+   return "FREE";
+}
+
+ReservedSegmentController ReservedSegmentController::self;
+
+const char* ReservedSegmentController::getName() {
+   return "FREE-RESERVED";
+}
+
+ForbiddenSegmentController ForbiddenSegmentController::self;
+
+const char* ForbiddenSegmentController::getName() {
+   return "FORBIDDEN";
+}
+

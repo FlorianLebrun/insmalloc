@@ -905,7 +905,6 @@ void* LibcInfoWithPatchFunctions<T>::Perftools_newarray(size_t size) {
 template<int T>
 void LibcInfoWithPatchFunctions<T>::Perftools_delete(void* p) {
 #if FAKE_PATCH
-   _ASSERT(!sat_has_address(p));
    return ((void(*)(void*))origstub_fn_[kDelete])(p);
 #else
    sat_free_with_callback(p, (void (*)(void*))origstub_fn_[kFree]);

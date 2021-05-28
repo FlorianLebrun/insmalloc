@@ -1,10 +1,10 @@
 #include "./index.h"
 
-void ZonedBuddyAllocator::Local::Cache::init(Global::Cache* global)
+void ZonedBuddyAllocator::Local::Cache::init(sat::Heap* localHeap, Global::Cache* global)
 {
    this->Cache::Cache();
    this->global = global;
-   this->pageSize = global->pageSize;
+   localHeap->setSlot(global->pageHeapSlot, this);
 
    this->base_cache_0.init(this, 0, &global->base_cache_0);
    this->base_cache_0.init_zoning();

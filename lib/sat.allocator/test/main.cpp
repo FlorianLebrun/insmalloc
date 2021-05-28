@@ -13,8 +13,8 @@ int main() {
 
    //test_buffer_alloc();
    //test_meta_alloc();
-   //test_perf_alloc();
-   test_types_alloc();
+   test_perf_alloc();
+   //test_types_alloc();
    //test_btree();
 
    fflush(stdout);

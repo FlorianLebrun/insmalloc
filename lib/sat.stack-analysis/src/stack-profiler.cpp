@@ -4,14 +4,18 @@
 namespace sat {
 
    StackProfiling::StackProfiling()
-      : stacktree(uintptr_t(&this[1]))
+      : stacktree(this, uintptr_t(&this[1]))
    {
    }
    StackProfiling* StackProfiling::create() {
-      uintptr_t index = memory::table->allocSegmentSpan(1);
-      StackProfiling* profiling = (StackProfiling*)(index << memory::cSegmentSizeL2);
-      profiling->StackProfiling::StackProfiling();
-      return profiling;
+      uintptr_t index = sat::MemoryTableController::self.allocSegmentSpan(1);
+      auto object = (StackProfiling*)(index << memory::cSegmentSizeL2);
+      object->StackProfiling::StackProfiling();
+      return object;
+   }
+
+   const char* StackProfiling::getName() {
+      return "STACK_PROFILING";
    }
    IStackProfiling::Node StackProfiling::getRoot() {
       return &this->stacktree.root;

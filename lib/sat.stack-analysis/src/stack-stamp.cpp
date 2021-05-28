@@ -15,15 +15,19 @@ namespace sat {
    }
 
    StackStampDatabase* StackStampDatabase::create() {
-      uintptr_t index = memory::table->allocSegmentSpan(1);
-      StackStampDatabase* tracer = (StackStampDatabase*)(index << memory::cSegmentSizeL2);
-      tracer->StackStampDatabase::StackStampDatabase(uintptr_t(&tracer[1]));
-      return tracer;
+      uintptr_t index = sat::MemoryTableController::self.allocSegmentSpan(1);
+      auto object = (StackStampDatabase*)(index << memory::cSegmentSizeL2);
+      object->StackStampDatabase::StackStampDatabase(uintptr_t(&object[1]));
+      return object;
    }
 
    StackStampDatabase::StackStampDatabase(uintptr_t firstSegmentBuffer)
-      : stacktree(firstSegmentBuffer)
+      : stacktree(this, firstSegmentBuffer)
    {
+   }
+
+   const char* StackStampDatabase::getName() {
+      return "STACKSTAMP_DATABASE";
    }
 
    void StackStampDatabase::traverseStack(uint64_t stackstamp, sat::IStackVisitor* visitor) {

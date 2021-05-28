@@ -8,8 +8,6 @@ namespace ZonedBuddyAllocator {
       struct PageObjectCache
       {
          Global::Cache* global;
-         uint32_t pageSize;
-         SATEntry* page_cache;
       };
    }
 }
@@ -35,15 +33,14 @@ namespace ZonedBuddyAllocator {
          ZoneCache<6, SubObjectCache<6>> base_cache_6;
          ZoneCache<7, SubObjectCache<7>> base_cache_7;
 
-         void init(Global::Cache* global);
+         void init(sat::Heap* localHeap, Global::Cache* global);
          sat::ObjectAllocator* getAllocator(int id);
          int getCachedSize();
          void flushCache();
 
-         int freePtr(::sat::memory::tEntry* ptrEntry, uintptr_t ptr)
+         int freePtr(ZonedBuddySegment* entry, uintptr_t ptr)
          {
             // Get object sat entry & index
-            const SATEntry entry = SATEntry(ptrEntry);
             int index = (ptr >> baseSizeL2) & 0xf;
 
             // Release in cache

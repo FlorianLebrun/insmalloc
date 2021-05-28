@@ -62,19 +62,15 @@ namespace ZonedBuddyAllocator {
       return (4 >> (supportLengthL2 - sizeID)) || 1;
    }
 
-   typedef struct tSATEntry {
-      uint8_t id;
-      uint8_t heapID;
-      uint8_t index;
-      uint8_t __unused__[5];
-      tSATEntry* next;
-#if UINTPTR_MAX == UINT32_MAX
-      uint32_t __next_i64;
-#endif
+   struct ZonedBuddySegment : public sat::MemorySegmentController {
       uint8_t tags[baseCount];
-   } *SATEntry;
-
-   static_assert(sizeof(tSATEntry) == sat::memory::cEntrySize, "Bad tSATEntry size");
+      uint8_t heapID;
+      uint8_t heapSlot;
+      virtual const char* getName() override;
+      virtual int free(uintptr_t index, uintptr_t ptr) override;
+      virtual bool getAddressInfos(uintptr_t index, uintptr_t ptr, sat::tpObjectInfos infos) override;
+      virtual int traverseObjects(uintptr_t index, sat::IObjectVisitor* visitor) override;
+   };
 
    uintptr_t traversePageObjects(uintptr_t index, bool& visitMore, sat::IObjectVisitor* visitor);
    bool get_address_infos(uintptr_t ptr, sat::tpObjectInfos infos);

@@ -42,7 +42,7 @@ namespace ZonedBuddyAllocator {
             // Case 3: Alloc a base zone to split in sub size object
             // --- Get a free zone
             uintptr_t ptr = (uintptr_t)upper->acquireObject();
-            SATEntry entry = sat::memory::table->get<tSATEntry>(ptr >> sat::memory::cSegmentSizeL2);
+            auto entry = sat::MemoryTableController::get<ZonedBuddySegment>(ptr >> sat::memory::cSegmentSizeL2);
             entry->tags[(ptr >> baseSizeL2) & 0xf] = sizeID | cTAG_ALLOCATED_BIT;
 
             // --- Cache the remain objects
@@ -116,7 +116,7 @@ namespace ZonedBuddyAllocator {
                }
             }
          }
-         int releaseObject(SATEntry entry, Object obj, int index, uintptr_t ptr) {
+         int releaseObject(ZonedBuddySegment* entry, Object obj, int index, uintptr_t ptr) {
 
             // Find object
             obj->status = STATUS_FREE(sizeID);

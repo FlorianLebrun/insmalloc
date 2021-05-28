@@ -30,14 +30,14 @@ namespace sat {
       return index;
    }
 
-   sat::FreeSegmentsTree::FreeSegmentsTree() {
+   FreeSegmentsTree::FreeSegmentsTree() {
       this->reserve = 0;
       this->freeNode(&_init_reserve[0]);
       this->freeNode(&_init_reserve[1]);
       this->freeNode(&_init_reserve[2]);
    }
 
-   sat::FreeSegmentsTree::BtNode* sat::FreeSegmentsTree::allocNode() {
+   FreeSegmentsTree::BtNode* FreeSegmentsTree::allocNode() {
       if (this->reserve) {
          BtNode* node = this->reserve;
          this->reserve = node->p[0];
@@ -48,16 +48,16 @@ namespace sat {
       }
    }
 
-   void sat::FreeSegmentsTree::freeNode(BtNode* node) {
+   void FreeSegmentsTree::freeNode(BtNode* node) {
       node->p[0] = this->reserve;
       this->reserve = node;
    }
 
-   sat::SegmentsAllocator::SegmentsAllocator() {
+   SegmentsAllocator::SegmentsAllocator() {
       this->allocated_segments = 0;
    }
 
-   uintptr_t sat::SegmentsAllocator::allocSegments(uintptr_t size, uintptr_t alignL2) {
+   uintptr_t SegmentsAllocator::allocSegments(uintptr_t size, uintptr_t alignL2) {
       uintptr_t spanIndex = 0, spanSize = 0;
 
       //printf("\n------------------------------\nRESERVING %d..", size);memorySystem().printSegments();
@@ -102,13 +102,6 @@ namespace sat {
             }
          }
 
-#ifdef _DEBUG
-         for (uintptr_t i = 0; i < size; i++) {
-            tFreeEntry& entry = table->entries[spanIndex + i].free;
-            _ASSERT(entry.id == sat::memory::tEntryID::FREE);
-            memset(&entry, 0xff, sizeof(sat::memory::tEntry));
-         }
-#endif
          this->allocated_segments += size;
          this->freelist_lock.unlock();
          return spanIndex;
@@ -117,9 +110,9 @@ namespace sat {
       return 0;
    }
 
-   void sat::SegmentsAllocator::freeSegments(uintptr_t index, uintptr_t size) {
+   void SegmentsAllocator::freeSegments(uintptr_t index, uintptr_t size) {
       for (uintptr_t i = 0; i < size; i++) {
-         table->entries[index + i].free.set(1);
+         MemoryTableController::table[index + i] = &ReservedSegmentController::self;
       }
       this->freelist_lock.lock();
       this->allocated_segments -= size;
@@ -127,16 +120,16 @@ namespace sat {
       this->freelist_lock.unlock();
    }
 
-   void sat::SegmentsAllocator::appendSegments(uintptr_t index, uintptr_t size) {
+   void SegmentsAllocator::appendSegments(uintptr_t index, uintptr_t size) {
       for (uintptr_t i = 0; i < size; i++) {
-         table->entries[index + i].free.set(0);
+         MemoryTableController::table[index + i] = &FreeSegmentController::self;
       }
       this->freelist_lock.lock();
       this->freespans.insert(MakeKey(index, size) | cKeyNotReserved);
       this->freelist_lock.unlock();
    }
 
-   uintptr_t sat::SegmentsAllocator::analyzeNotReservedSpan(uintptr_t index, uintptr_t length) { // return true when span has been split
+   uintptr_t SegmentsAllocator::analyzeNotReservedSpan(uintptr_t index, uintptr_t length) { // return true when span has been split
       uintptr_t limit = index + length;
       uintptr_t freelength = 0;
 
@@ -168,9 +161,10 @@ namespace sat {
          if (zone.state != SystemMemory::FREE) {
 
             // Mark the sat has forbidden
+            auto table = MemoryTableController::table;
             for (uintptr_t i = zoneStart; i <= zoneEnd; i++) {
-               _ASSERT(table->entries[i].id == sat::memory::tEntryID::FREE);
-               table->entries[i].forbidden.set();
+               _ASSERT(table[i] == &FreeSegmentController::self || table[i] == &ReservedSegmentController::self);
+               table[i] = &ForbiddenSegmentController::self;
             }
 
             // Save the last freespan

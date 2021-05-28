@@ -11,27 +11,36 @@ namespace ZonedBuddyAllocator {
       };
 
       struct PageObjectCache {
-         uint32_t pageID;
          uint32_t pageSize;
          uint32_t pageHeapID;
+         uint32_t pageHeapSlot;
          sat::Heap* pageHeap;
 
-         void initializeSATEntry(uintptr_t index)
-         {
-            SATEntry entry = sat::memory::table->get<tSATEntry>(index);
-            entry[0].heapID = this->pageHeapID;
-            entry[0].id = this->pageID;
-            entry[0].index = 0;
-            ((uint64_t*)entry[0].tags)[0] = 0;
-            ((uint64_t*)entry[0].tags)[1] = 0;
-         }
          uintptr_t acquirePage() {
+
+            // Create segment controller
+            auto entrySizeId = sat::memory::getSystemSizeID(sizeof(ZonedBuddySegment));
+            auto entry = new(sat::memory::allocSystemBuffer(entrySizeId)) ZonedBuddySegment();
+            entry->heapID = this->pageHeapID;
+            entry->heapSlot = this->pageHeapSlot;
+            ((uint64_t*)entry->tags)[0] = 0;
+            ((uint64_t*)entry->tags)[1] = 0;
+
+            // Allocate segment
             uintptr_t index = this->pageHeap->acquirePages(1);
-            this->initializeSATEntry(index);
+            sat::MemoryTableController::set(index, entry);
             return uintptr_t(index << sat::memory::cSegmentSizeL2);
          }
          void releasePage(uintptr_t ptr) {
-            this->pageHeap->releasePages(uintptr_t(ptr) >> sat::memory::cSegmentSizeL2, 1);
+
+            // Free segment
+            uintptr_t index = uintptr_t(ptr) >> sat::memory::cSegmentSizeL2;
+            auto entry = sat::MemoryTableController::get<ZonedBuddySegment>(index);
+            this->pageHeap->releasePages(index, 1);
+
+            // Delete segment controller
+            auto entrySizeId = sat::memory::getSystemSizeID(sizeof(ZonedBuddySegment));
+            sat::memory::freeSystemBuffer(entry, entrySizeId);
          }
       };
    }
@@ -59,15 +68,14 @@ namespace ZonedBuddyAllocator {
          ZoneCache<6, SubObjectCache<6> > base_cache_6;
          ZoneCache<7, SubObjectCache<7> > base_cache_7;
 
-         void init(sat::Heap* pageHeap, int pageID = sat::tHeapEntryID::PAGE_ZONED_BUDDY);
+         void init(sat::Heap* pageHeap);
          sat::ObjectAllocator* getAllocator(int id);
          int getCachedSize();
          void flushCache();
 
-         int freePtr(::sat::memory::tEntry* ptrEntry, uintptr_t ptr)
+         int freePtr(ZonedBuddySegment* entry, uintptr_t ptr)
          {
             // Get object sat entry & index
-            const SATEntry entry = SATEntry(ptrEntry);
             int index = (ptr >> baseSizeL2) & 0xf;
 
             // Release in cache
@@ -86,10 +94,9 @@ namespace ZonedBuddyAllocator {
             }
             throw std::exception("Cannot free a not allocated object");
          }
-         void markPtr(sat::memory::tEntry* ptrEntry, uintptr_t ptr)
+         void markPtr(ZonedBuddySegment* entry, uintptr_t ptr)
          {
             // Get object sat entry & index
-            const SATEntry entry = SATEntry(ptrEntry);
             int index = (ptr >> baseSizeL2) & 0xf;
 
             // Release in cache

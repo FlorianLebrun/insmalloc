@@ -1,12 +1,12 @@
 #include "./index.h"
 
-void ZonedBuddyAllocator::Global::Cache::init(sat::Heap* pageHeap, int pageID)
+void ZonedBuddyAllocator::Global::Cache::init(sat::Heap* globalHeap)
 {
    SizeMapping::init();
-   this->pageID = pageID;
    this->pageSize = 1 << sat::memory::cSegmentSizeL2;
-   this->pageHeap = pageHeap;
-   this->pageHeapID = pageHeap->getID();
+   this->pageHeap = globalHeap;
+   this->pageHeapID = globalHeap->getID();
+   this->pageHeapSlot = globalHeap->acquireSlot(this);
 
    this->base_cache_0.init(this, 0);
    this->base_cache_0.init_zoning();

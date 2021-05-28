@@ -6,8 +6,9 @@
 
 namespace sat {
 
-   struct StackProfiling : public SystemObject<IStackProfiling>::Derived<StackProfiling> {
+   struct StackProfiling : public SystemObject<IStackProfiling>::Derived<StackProfiling>, public MemoryTableController {
       StackTree<tData> stacktree;
+      virtual const char* getName() override;
       virtual IStackProfiling::Node getRoot() override;
       virtual void print() override;
       static StackProfiling* create();

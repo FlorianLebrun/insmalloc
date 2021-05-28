@@ -53,6 +53,10 @@ public:
 
 __declspec(thread) sat::LocalHeap* CurrentLocalHeap::__current_local_heap = nullptr;
 
+sat::LocalHeap* sat::getLocalHeap() {
+   return CurrentLocalHeap::get();
+}
+
 void _sat_set_default_allocator(
    sat::tp_malloc malloc,
    sat::tp_realloc realloc,
@@ -68,7 +72,7 @@ void _sat_set_default_allocator(
 void sat_init_process() {
    if (!is_initialized) {
       is_initialized = true;
-      sat::memory::MemoryTable::initialize();
+      sat::MemoryTableController::self.initialize();
       g_SAT.initialize();
    }
    else printf("sat library is initalized more than once.");
@@ -188,58 +192,18 @@ void* sat_realloc(void* ptr, size_t size, sat::tp_realloc default_realloc) {
 
 void sat_free(void* ptr, sat::tp_free default_free) {
    uintptr_t index = uintptr_t(ptr) >> sat::memory::cSegmentSizeL2;
-   int size;
-   if (index < sat::memory::table->descriptor.length) {
-      auto entry = sat::memory::table->get<sat::memory::tHeapSegmentEntry>(index);
-      if (entry->isHeapSegment()) {
-         auto local_heap = CurrentLocalHeap::check();
-         if (local_heap && entry->heapID == local_heap->heapID) {
-            size = local_heap->free(ptr);
-         }
-         else {
-            size = g_SAT.heaps_table[entry->heapID]->free(ptr);
-         }
-         assert(size > 0);
-         return;
-      }
-      else if (entry->id == sat::memory::tEntryID::FORBIDDEN || entry->id == sat::memory::tEntryID::FREE) {
-         if (default_free) default_free(ptr);
-         else if (_sat_default_free) _sat_default_free(ptr);
-         else printf("sat cannot free unkown buffer\n");
-      }
-      else printf("sat_free: out of range pointer %.12llX\n", int64_t(ptr));
+   if (index < sat::MemoryTableController::self.length) {
+      auto entry = sat::MemoryTableController::table[index];
+      entry->free(index, uintptr_t(ptr));
    }
    else printf("sat_free: out of range pointer %.12llX\n", int64_t(ptr));
 }
 
-bool sat_has_address(void* ptr) {
-   uintptr_t index = uintptr_t(ptr) >> sat::memory::cSegmentSizeL2;
-   if (index < sat::memory::table->descriptor.length) {
-      auto entry = &sat::memory::table->entries[index];
-      return (entry->id != sat::memory::tEntryID::FORBIDDEN && entry->id != sat::memory::tEntryID::FREE);
-   }
-   return false;
-}
-
 bool sat_get_address_infos(void* ptr, sat::tpObjectInfos infos) {
    uintptr_t index = uintptr_t(ptr) >> sat::memory::cSegmentSizeL2;
-   if (index < sat::memory::table->descriptor.length) {
-      auto entry = &sat::memory::table->entries[index];
-      switch (entry->id) {
-      case sat::tHeapEntryID::PAGE_ZONED_BUDDY:
-         return ZonedBuddyAllocator::get_address_infos(uintptr_t(ptr), infos);
-      case sat::tHeapEntryID::LARGE_OBJECT:
-         return LargeObjectAllocator::get_address_infos(uintptr_t(ptr), infos);
-      case sat::tHeapEntryID::PAGE_SCALED_BUDDY_3:
-      case sat::tHeapEntryID::PAGE_SCALED_BUDDY_5:
-      case sat::tHeapEntryID::PAGE_SCALED_BUDDY_7:
-      case sat::tHeapEntryID::PAGE_SCALED_BUDDY_9:
-      case sat::tHeapEntryID::PAGE_SCALED_BUDDY_11:
-      case sat::tHeapEntryID::PAGE_SCALED_BUDDY_13:
-      case sat::tHeapEntryID::PAGE_SCALED_BUDDY_15:
-         if (infos) infos->set(entry->getHeapID(), uintptr_t(ptr), 0);
-         return true;
-      }
+   if (index < sat::MemoryTableController::self.length) {
+      auto entry = sat::MemoryTableController::table[index];
+      return entry->getAddressInfos(index, uintptr_t(ptr), infos);
    }
    return false;
 }

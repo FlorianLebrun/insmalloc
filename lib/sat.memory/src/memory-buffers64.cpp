@@ -4,11 +4,13 @@
 #include "../../common/bitwise.h"
 #include <exception>
 
-void sat::PooledBuffers64::initialize(sat::memory::MemoryTable* table) {
+using namespace sat;
+
+void PooledBuffers64Controller::initialize() {
 
    // Allocate buffer 64
    uintptr_t buffer64_size = 1024 * 4;
-   uintptr_t buffer64_index = table->allocSegmentSpan(buffer64_size);
+   uintptr_t buffer64_index = MemoryTableController::self.allocSegmentSpan(buffer64_size);
    if (!buffer64_index) throw std::exception("map on reserved segment has failed");
    this->Cursor = tpBuffer64(buffer64_index << sat::memory::cSegmentSizeL2);
    this->Limit = tpBuffer64((buffer64_index + buffer64_size) << sat::memory::cSegmentSizeL2);
@@ -16,26 +18,32 @@ void sat::PooledBuffers64::initialize(sat::memory::MemoryTable* table) {
 
    // Mark buffer 64 pool
    for (uintptr_t i = 0; i < buffer64_size; i++) {
-      table->entries[buffer64_index + i].id = sat::memory::tEntryID::SYSTEM_BUFFER_PAGE;
+      MemoryTableController::table[buffer64_index + i] = this;
    }
 }
 
-void* sat::PooledBuffers64::allocBufferSpanL2(uint32_t level) {
+void* PooledBuffers64Controller::allocBufferSpanL2(uint32_t level) {
    tpBuffer64 ptr;
    if (this->Levels[level]) {
-      this->Lock.lock();
+      SpinLockHolder guard(this->Lock);
       ptr = this->Levels[level];
-      this->Lock.unlock();
-      if (ptr) return ptr;
+      if (ptr) {
+         this->Levels[level] = ptr->next;
+         return ptr;
+      }
    }
    ptr = this->Cursor.fetch_add(uint64_t(1) << level);
    _ASSERT(ptr < this->Limit);
    return ptr;
 }
 
-void sat::PooledBuffers64::freeBufferSpanL2(void* ptr, uint32_t level) {
-   this->Lock.lock();
+void PooledBuffers64Controller::freeBufferSpanL2(void* ptr, uint32_t level) {
+   SpinLockHolder guard(this->Lock);
    tpBuffer64(ptr)->next = this->Levels[level];
    this->Levels[level] = tpBuffer64(ptr);
-   this->Lock.unlock();
+}
+
+
+const char* PooledBuffers64Controller::getName() {
+   return "SYSTEM-OBJECT";
 }

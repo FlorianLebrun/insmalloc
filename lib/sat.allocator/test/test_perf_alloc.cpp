@@ -161,10 +161,17 @@ struct tTest {
     Sleep(50);
 #endif
 
+    this->test_default_malloc();
+    Sleep(50);
+
     this->test_sat_malloc();
     Sleep(50);
 
     this->test_default_malloc();
+    Sleep(50);
+
+    this->test_sat_malloc();
+    Sleep(50);
 
   }
 };

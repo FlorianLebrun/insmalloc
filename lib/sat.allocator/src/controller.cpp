@@ -17,14 +17,10 @@ namespace sat {
 void sat::ControllerImpl::traverseObjects(sat::IObjectVisitor* visitor, uintptr_t start_address) {
    int i = start_address >> sat::memory::cSegmentSizeL2;
    bool visitMore = true;
-   while (i < sat::memory::table->descriptor.length && visitMore) {
-      if (sat::memory::table->entries[i].getHeapID() >= 0) {
-         switch (sat::memory::table->entries[i].id) {
-         case sat::tHeapEntryID::PAGE_ZONED_BUDDY:
-            i += ZonedBuddyAllocator::traversePageObjects(i, visitMore, visitor);
-            break;
-         default: i++;
-         }
+   while (i < MemoryTableController::self.length && visitMore) {
+      auto controller = MemoryTableController::table[i];
+      if (controller->getHeapID() >= 0) {
+         i += controller->traverseObjects(i, visitor);
       }
       else i++;
    }

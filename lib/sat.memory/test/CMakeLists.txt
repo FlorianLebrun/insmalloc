@@ -7,8 +7,11 @@ append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" DIRECTORIES "./")
 add_executable(${target} WIN32 ${files})
 set_target_properties(${target} PROPERTIES FOLDER "Tests")
 
+# Set compile properties
+target_compile_definitions(${target} PRIVATE "SAT_API=__declspec(dllexport)")
+
 # Set link properties
-target_link_libraries(${target} PRIVATE libsat)
+target_link_libraries(${target} PRIVATE sat.memory)
 target_link_options(${target} PRIVATE /SUBSYSTEM:CONSOLE)
 
 # Setting for development comfort

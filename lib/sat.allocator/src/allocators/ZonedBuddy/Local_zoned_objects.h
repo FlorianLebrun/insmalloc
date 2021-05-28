@@ -50,7 +50,7 @@ namespace ZonedBuddyAllocator {
 
             // --- Retag the sat entries for this object
             if (sizeID < baseCountL2) {
-               SATEntry entry = sat::memory::table->get<tSATEntry>(uintptr_t(zone) >> sat::memory::cSegmentSizeL2);
+               auto entry = sat::MemoryTableController::get<ZonedBuddySegment>(uintptr_t(zone) >> sat::memory::cSegmentSizeL2);
                WriteTags<sizeID, sizeID | cTAG_ALLOCATED_BIT>::apply(entry, uintptr_t(zone) >> baseSizeL2);
             }
 
@@ -103,7 +103,7 @@ namespace ZonedBuddyAllocator {
                }
             }
          }
-         size_t freeObject(SATEntry entry, Zone zone, uintptr_t ptr) {
+         size_t freeObject(ZonedBuddySegment* entry, Zone zone, uintptr_t ptr) {
 
             // Find object
             uintptr_t offset = ptr & TBaseCache::objectOffsetMask;
@@ -163,7 +163,7 @@ namespace ZonedBuddyAllocator {
          int getCachedSize() {
             return this->objects.count << sizeL2;
          }
-         int freeObject(SATEntry entry, int index, uintptr_t ptr)
+         int freeObject(ZonedBuddySegment* entry, int index, uintptr_t ptr)
          {
             // Find object address
             const Object obj = Object(ptr & objectPtrMask);

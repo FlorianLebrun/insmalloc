@@ -4,6 +4,9 @@
 
 using namespace sat;
 
+BaseHeap::BaseHeap() {
+   memset(this->slots, 0, sizeof(this->slots));
+}
 BaseHeap::~BaseHeap() {
 }
 
@@ -28,6 +31,14 @@ size_t BaseHeap::getMinAllocatedSizeWithMeta() {
 }
 size_t BaseHeap::getAllocatedSizeWithMeta(size_t size) {
    return this->sizeMappingWithMeta.getAllocator(size)->getAllocatedSizeWithMeta(size);
+}
+
+void* BaseHeap::getSlot(uintptr_t slotId) {
+   return this->slots[slotId];
+}
+
+void BaseHeap::setSlot(uintptr_t slotId, void* value) {
+   this->slots[slotId] = value;
 }
 
 void* BaseHeap::allocate(size_t size) {
@@ -113,12 +124,18 @@ const char* GlobalHeap::getName() {
    return this->name;
 }
 
+uintptr_t GlobalHeap::acquireSlot(void* value)  { 
+   uintptr_t slotID = this->slotsCount++;
+   this->setSlot(slotID, value);
+   return slotID;
+}
+
 uintptr_t GlobalHeap::acquirePages(size_t size) {
-   return sat::memory::table->allocSegmentSpan(size);
+   return sat::MemoryTableController::self.allocSegmentSpan(size);
 }
 
 void GlobalHeap::releasePages(uintptr_t index, size_t size) {
-   return sat::memory::table->freeSegmentSpan(index, size);
+   return sat::MemoryTableController::self.freeSegmentSpan(index, size);
 }
 
 LocalHeap::LocalHeap(GlobalHeap* global) {
@@ -145,10 +162,10 @@ const char* LocalHeap::getName() {
 }
 
 uintptr_t LocalHeap::acquirePages(size_t size) {
-   return sat::memory::table->allocSegmentSpan(size);
+   return sat::MemoryTableController::self.allocSegmentSpan(size);
 }
 
 void LocalHeap::releasePages(uintptr_t index, size_t size) {
-   return sat::memory::table->freeSegmentSpan(index, size);
+   return sat::MemoryTableController::self.freeSegmentSpan(index, size);
 }
 

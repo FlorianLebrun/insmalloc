@@ -1,4 +1,5 @@
 #include "./index.h"
+#include "../../controller.h"
 
 using namespace ZonedBuddyAllocator;
 
@@ -54,139 +55,156 @@ void SizeMapping::init() {
    }
 }
 
-namespace ZonedBuddyAllocator {
-   bool get_address_infos(uintptr_t ptr, sat::tpObjectInfos infos) {
-      tSATEntry* entry = sat::memory::table->get<tSATEntry>(ptr >> sat::memory::cSegmentSizeL2);
-      uintptr_t offset = ptr & sat::memory::cSegmentOffsetMask;
-      uintptr_t tagId = offset >> ZonedBuddyAllocator::baseSizeL2;
-      int tag = entry->tags[tagId];
-      if (tag & cTAG_ALLOCATED_BIT) {
+const char* ZonedBuddySegment::getName() {
+   return "PAGE_ZONED_BUDDY";
+}
 
-         // Find object
-         uintptr_t sizeID = tag & cTAG_SIZEID_MASK;
-         uintptr_t sizeL2 = supportSizeL2 - sizeID;
-         Object obj = Object(ptr & -(1 << sizeL2));
+int ZonedBuddySegment::free(uintptr_t index, uintptr_t ptr) {
+   auto localHeap = sat::getLocalHeap();
+   if (localHeap->heapID == this->heapID) {
+      auto cache = (Local::Cache*)localHeap->getSlot(this->heapSlot);
+      return cache->freePtr(this, ptr);
+   }
+   else {
+      auto cache = (Global::Cache*)g_SAT.getHeap(this->heapID);
+      return cache->freePtr(this, ptr);
+   }
+}
 
-         // Get infos
-         if (obj->zoneID) {
-            Zone zone = Zone(obj);
-            int subObjectSize = (((supportSize >> sizeID) - sizeof(tZone)) / zone->zoneID) & (-8);
+bool ZonedBuddySegment::getAddressInfos(uintptr_t index, uintptr_t ptr, sat::tpObjectInfos infos) {
+   uintptr_t offset = ptr & sat::memory::cSegmentOffsetMask;
+   uintptr_t tagId = offset >> ZonedBuddyAllocator::baseSizeL2;
+   int tag = this->tags[tagId];
+   if (tag & cTAG_ALLOCATED_BIT) {
 
-            uintptr_t offset = ptr - uintptr_t(&zone[1]);
-            uintptr_t index = offset / subObjectSize;
-            uintptr_t base = uintptr_t((index * subObjectSize) + uintptr_t(&zone[1]));
-            uint8_t tag = zone->tags[index];
-            if (tag & cZONETAG_ALLOCATED_BIT) {
-               if (tag & cZONETAG_METADATA_BIT) {
-                  if (infos) infos->set(entry->heapID, base + sizeof(uint64_t), subObjectSize - sizeof(uint64_t), (uint64_t*)base);
-               }
-               else {
-                  if (infos) infos->set(entry->heapID, base, subObjectSize);
-               }
-               return true;
-            }
-         }
-         else {
-            uintptr_t base = uintptr_t(obj) + tObject::headerSize;
-            if (obj->tag & cTAG_METADATA_BIT) {
-               if (infos) infos->set(entry->heapID, base + sizeof(uint64_t), (uintptr_t(1) << sizeL2) - sizeof(uint64_t), (uint64_t*)base);
+      // Find object
+      uintptr_t sizeID = tag & cTAG_SIZEID_MASK;
+      uintptr_t sizeL2 = supportSizeL2 - sizeID;
+      Object obj = Object(ptr & -(1 << sizeL2));
+
+      // Get infos
+      if (obj->zoneID) {
+         Zone zone = Zone(obj);
+         int subObjectSize = (((supportSize >> sizeID) - sizeof(tZone)) / zone->zoneID) & (-8);
+
+         uintptr_t offset = ptr - uintptr_t(&zone[1]);
+         uintptr_t index = offset / subObjectSize;
+         uintptr_t base = uintptr_t((index * subObjectSize) + uintptr_t(&zone[1]));
+         uint8_t tag = zone->tags[index];
+         if (tag & cZONETAG_ALLOCATED_BIT) {
+            if (tag & cZONETAG_METADATA_BIT) {
+               if (infos) infos->set(this->heapID, base + sizeof(uint64_t), subObjectSize - sizeof(uint64_t), (uint64_t*)base);
             }
             else {
-               if (infos) infos->set(entry->heapID, base, uintptr_t(1) << sizeL2);
+               if (infos) infos->set(this->heapID, base, subObjectSize);
             }
             return true;
          }
       }
-      return false;
+      else {
+         uintptr_t base = uintptr_t(obj) + tObject::headerSize;
+         if (obj->tag & cTAG_METADATA_BIT) {
+            if (infos) infos->set(this->heapID, base + sizeof(uint64_t), (uintptr_t(1) << sizeL2) - sizeof(uint64_t), (uint64_t*)base);
+         }
+         else {
+            if (infos) infos->set(this->heapID, base, uintptr_t(1) << sizeL2);
+         }
+         return true;
+      }
    }
+   return false;
 }
 
-namespace ZonedBuddyAllocator {
-   void traverseZonedObjects(tSATEntry* entry, Zone zone, int zoneSize, bool& visitMore, sat::IObjectVisitor* visitor) {
-      uintptr_t ptr = uintptr_t(&zone[1]);
-      int dividor = zone->zoneID;
-      int size = ((zoneSize - sizeof(tZone)) / dividor) & (-8);
-      for (int i = 0; i < dividor && visitMore; i++) {
-         uint8_t tag = zone->tags[i];
-         if (tag & cZONETAG_ALLOCATED_BIT) {
-            uint64_t* base = ((uint64_t*)ptr);
-            if (tag & cZONETAG_METADATA_BIT) {
-               visitMore = visitor->visit(&sat::tObjectInfos().set(entry->heapID, uintptr_t(base) + sizeof(uint64_t), size - sizeof(uint64_t), base));
-            }
-            else {
-               visitMore = visitor->visit(&sat::tObjectInfos().set(entry->heapID, uintptr_t(base), size));
-            }
-         }
-         ptr += size;
-      }
-   }
-   void traverseSubObjects(tSATEntry* entry, uintptr_t ptr, int count, int size, bool& visitMore, sat::IObjectVisitor* visitor) {
-      for (int i = 0; i < count && visitMore; i++) {
-         Object obj = Object(ptr);
-         if (!(obj->status & cSTATUS_FREE_ID)) {
-            if (obj->zoneID & 0xf) {
-               traverseZonedObjects(entry, Zone(obj), size, visitMore, visitor);
-            }
-            else {
-               int offset = tObject::headerSize;
-               if (obj->tag & cTAG_METADATA_BIT) {
-                  offset += sizeof(uint64_t);
-                  visitMore = visitor->visit(&sat::tObjectInfos().set(entry->heapID, uintptr_t(obj) + offset, size - offset, obj->content()));
+int ZonedBuddySegment::traverseObjects(uintptr_t index, sat::IObjectVisitor* visitor) {
+   struct internal {
+      void traverseZonedObjects(ZonedBuddySegment* entry, Zone zone, int zoneSize, bool& visitMore, sat::IObjectVisitor* visitor) {
+         uintptr_t ptr = uintptr_t(&zone[1]);
+         int dividor = zone->zoneID;
+         int size = ((zoneSize - sizeof(tZone)) / dividor) & (-8);
+         for (int i = 0; i < dividor && visitMore; i++) {
+            uint8_t tag = zone->tags[i];
+            if (tag & cZONETAG_ALLOCATED_BIT) {
+               uint64_t* base = ((uint64_t*)ptr);
+               if (tag & cZONETAG_METADATA_BIT) {
+                  visitMore = visitor->visit(&sat::tObjectInfos().set(entry->heapID, uintptr_t(base) + sizeof(uint64_t), size - sizeof(uint64_t), base));
                }
                else {
-                  visitMore = visitor->visit(&sat::tObjectInfos().set(entry->heapID, uintptr_t(obj) + offset, size - offset));
+                  visitMore = visitor->visit(&sat::tObjectInfos().set(entry->heapID, uintptr_t(base), size));
                }
             }
+            ptr += size;
          }
-         ptr += size;
       }
-   }
-   uintptr_t traversePageObjects(uintptr_t index, bool& visitMore, sat::IObjectVisitor* visitor) {
-      tSATEntry* entry = (tSATEntry*)&sat::memory::table->entries[index];
-      uintptr_t base = index << sat::memory::cSegmentSizeL2;
-      for (int i = 0; i < 16 && visitMore;) {
-         int tag = entry->tags[i];
-         if (tag & cTAG_ALLOCATED_BIT) {
-            int sizeID = tag & cTAG_SIZEID_MASK;
-            int size = supportSize >> sizeID;
-            uintptr_t ptr = base + (i << baseSizeL2);
-            switch (sizeID) {
-            case 0:
-               traverseSubObjects(entry, ptr, 1, size, visitMore, visitor);
-               i += 8;
-               break;
-            case 1:
-               traverseSubObjects(entry, ptr, 1, size, visitMore, visitor);
-               i += 4;
-               break;
-            case 2:
-               traverseSubObjects(entry, ptr, 1, size, visitMore, visitor);
-               i += 2;
-               break;
-            case 3:
-               traverseSubObjects(entry, ptr, 1, size, visitMore, visitor);
-               i++;
-               break;
-            case 4:
-               traverseSubObjects(entry, ptr, 2, size, visitMore, visitor);
-               i++;
-               break;
-            case 5:
-               traverseSubObjects(entry, ptr, 4, size, visitMore, visitor);
-               i++;
-               break;
-            case 6:
-               traverseSubObjects(entry, ptr, 8, size, visitMore, visitor);
-               i++;
-               break;
-            case 7:
-               traverseSubObjects(entry, ptr, 16, size, visitMore, visitor);
-               i++;
-               break;
+      void traverseSubObjects(ZonedBuddySegment* entry, uintptr_t ptr, int count, int size, bool& visitMore, sat::IObjectVisitor* visitor) {
+         for (int i = 0; i < count && visitMore; i++) {
+            Object obj = Object(ptr);
+            if (!(obj->status & cSTATUS_FREE_ID)) {
+               if (obj->zoneID & 0xf) {
+                  traverseZonedObjects(entry, Zone(obj), size, visitMore, visitor);
+               }
+               else {
+                  int offset = tObject::headerSize;
+                  if (obj->tag & cTAG_METADATA_BIT) {
+                     offset += sizeof(uint64_t);
+                     visitMore = visitor->visit(&sat::tObjectInfos().set(entry->heapID, uintptr_t(obj) + offset, size - offset, obj->content()));
+                  }
+                  else {
+                     visitMore = visitor->visit(&sat::tObjectInfos().set(entry->heapID, uintptr_t(obj) + offset, size - offset));
+                  }
+               }
             }
+            ptr += size;
          }
-         else i++;
       }
-      return 1;
-   }
+      uintptr_t traversePageObjects(uintptr_t index, bool& visitMore, sat::IObjectVisitor* visitor) {
+         auto entry = sat::MemoryTableController::get<ZonedBuddySegment>(index);
+         uintptr_t base = index << sat::memory::cSegmentSizeL2;
+         for (int i = 0; i < 16 && visitMore;) {
+            int tag = entry->tags[i];
+            if (tag & cTAG_ALLOCATED_BIT) {
+               int sizeID = tag & cTAG_SIZEID_MASK;
+               int size = supportSize >> sizeID;
+               uintptr_t ptr = base + (i << baseSizeL2);
+               switch (sizeID) {
+               case 0:
+                  traverseSubObjects(entry, ptr, 1, size, visitMore, visitor);
+                  i += 8;
+                  break;
+               case 1:
+                  traverseSubObjects(entry, ptr, 1, size, visitMore, visitor);
+                  i += 4;
+                  break;
+               case 2:
+                  traverseSubObjects(entry, ptr, 1, size, visitMore, visitor);
+                  i += 2;
+                  break;
+               case 3:
+                  traverseSubObjects(entry, ptr, 1, size, visitMore, visitor);
+                  i++;
+                  break;
+               case 4:
+                  traverseSubObjects(entry, ptr, 2, size, visitMore, visitor);
+                  i++;
+                  break;
+               case 5:
+                  traverseSubObjects(entry, ptr, 4, size, visitMore, visitor);
+                  i++;
+                  break;
+               case 6:
+                  traverseSubObjects(entry, ptr, 8, size, visitMore, visitor);
+                  i++;
+                  break;
+               case 7:
+                  traverseSubObjects(entry, ptr, 16, size, visitMore, visitor);
+                  i++;
+                  break;
+               }
+            }
+            else i++;
+         }
+         return 1;
+      }
+   };
+   bool visitMore;
+   return internal().traversePageObjects(index, visitMore, visitor);
 }

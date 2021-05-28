@@ -3,19 +3,17 @@
 
 namespace LargeObjectAllocator {
 
-   struct tHeapLargeObjectEntry {
-      uint8_t id; // = LARGE_OBJECT
+   class LargeObjectSegment :public sat::MemorySegmentController {
+   public:
       uint8_t heapID;
       uint32_t index;
       uint32_t length;
       uint64_t meta;
-      void set(uint8_t heapID, uint32_t index, uint32_t length, uint64_t meta) {
-         this->id = sat::tHeapEntryID::LARGE_OBJECT;
-         this->heapID = heapID;
-         this->index = index;
-         this->length = length;
-         this->meta = meta;
-      }
+      LargeObjectSegment(uint8_t heapID, uint32_t index, uint32_t length, uint64_t meta);
+      virtual const char* getName() override;
+      virtual int free(uintptr_t index, uintptr_t ptr) override;
+      virtual bool getAddressInfos(uintptr_t index, uintptr_t ptr, sat::tpObjectInfos infos) override;
+      virtual int traverseObjects(uintptr_t index, sat::IObjectVisitor* visitor) override;
    };
 
    struct Global : public sat::ObjectAllocator {
@@ -32,8 +30,6 @@ namespace LargeObjectAllocator {
       virtual size_t getMinAllocatedSizeWithMeta() override;
       virtual size_t getAllocatedSizeWithMeta(size_t size) override;
       virtual void* allocateWithMeta(size_t size, uint64_t meta) override;
-
-      size_t freePtr(uintptr_t index);
    };
 
    bool get_address_infos(uintptr_t ptr, sat::tpObjectInfos infos);
