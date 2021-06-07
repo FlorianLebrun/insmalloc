@@ -21,7 +21,7 @@ struct tTest {
   void freePtr(void* obj)
   {
     intptr_t ptr = intptr_t(obj);
-    tSATEntry* entry = g_SAT.get(ptr >> sat::SegmentSizeL2);
+    tSATEntry* entry = sat::MemoryTable::get(ptr >> sat::SegmentSizeL2);
     if (entry->id == tSATEntryID::PAGE_SCALED_BUDDY_1) localHeap.freePtr(entry, ptr);
   }
 
@@ -36,7 +36,7 @@ struct tTest {
       //printf("%d\n", i);
       objects[i] = localHeap.allocObject(7);
     }
-    //g_SAT.printSegments();
+    //sat::MemoryTable::self.printSegments();
     for (int i = 0; i < count; i++) {
       //printf("%d\n", i);
       freePtr(objects[i]);
@@ -44,7 +44,7 @@ struct tTest {
     localHeap.flushCache();
     globalHeap.flushCache();
     printf("time %g ns\n", c.GetDiffFloat(Chrono::NS) / float(count));
-    g_SAT.printSegments();
+    sat::MemoryTable::self.printSegments();
   }
   void test_tcmalloc() {
     using namespace ScaledBuddySubAllocator;

@@ -2,7 +2,6 @@
 #include <sat/system-object.hpp>
 #include <sat/memory.hpp>
 #include <sat/thread.hpp>
-#include <sat/objects_types.h>
 #include <sat/objects_infos.h>
 
 namespace sat {
@@ -40,16 +39,10 @@ namespace sat {
       virtual void setSlot(uintptr_t slotId, void* value) = 0;
    };
 
-   struct Controller {
 
-      // Heap management
-      virtual Heap* createHeap(tHeapType type, const char* name = 0) = 0;
-      virtual Heap* getHeap(int id) = 0;
-
-      // Analysis
-      virtual void traverseObjects(IObjectVisitor* visitor, uintptr_t start_address = 0) = 0;
-      virtual bool checkObjectsOverflow() = 0;
-   };
+   // Heap management
+   extern Heap* createHeap(tHeapType type, const char* name = 0);
+   extern Heap* getHeap(int id);
 
    typedef void* (*tp_malloc)(size_t size);
    typedef void* (*tp_realloc)(void* ptr, size_t size);
@@ -72,8 +65,5 @@ extern"C" SAT_API void* sat_realloc(void* ptr, size_t size, sat::tp_realloc defa
 extern"C" SAT_API size_t sat_msize(void* ptr, sat::tp_msize default_msize = 0);
 extern"C" SAT_API void sat_free(void* ptr, sat::tp_free default_free = 0);
 extern"C" SAT_API void sat_flush_cache();
-
-// Reflexion API
-extern"C" SAT_API sat::Controller* sat_get_contoller();
 
 extern"C" SAT_API bool sat_get_address_infos(void* ptr, sat::tpObjectInfos infos = 0);

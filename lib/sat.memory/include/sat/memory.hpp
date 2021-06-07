@@ -63,6 +63,10 @@ namespace sat {
       template <typename T = MemoryTableEntry>
       static T* set(uintptr_t index, T* entry) { return (T*)(table[index] = entry); }
 
+      // Analysis
+      void traverseObjects(sat::IObjectVisitor* visitor, uintptr_t target_address = 0);
+      bool checkObjectsOverflow();
+
       // Helpers
       void printSegments();
    };

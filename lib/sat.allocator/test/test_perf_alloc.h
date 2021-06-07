@@ -176,6 +176,6 @@ struct SATmallocAllocTest : AllocTest {
   }
   virtual void EndInfos() override {
     this->AllocTest::EndInfos();
-    //g_SAT.printSegments();
+    //sat::MemoryTable::self.printSegments();
   }
 };

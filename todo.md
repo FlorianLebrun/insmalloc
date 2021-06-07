@@ -4,7 +4,7 @@ sat::IThread* sat::Controller::configureCurrentThread(const char* name, int heap
   if (this->getThreadById(threadId)) {
     throw std::exception("Thread already registered");
   }
-  else if (!g_SAT.heaps_table[heapId]) {
+  else if (!sat::heaps_table[heapId]) {
     throw std::exception("Heap required for this thread doesn't exist");
   }
   printf("thread:%lld %s is attached.\n", threadId, name);

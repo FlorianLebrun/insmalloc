@@ -31,7 +31,7 @@ namespace ScaledBuddySubAllocator {
       Object page = list.first;
       while (page) {
         Object page_next = page->next;
-        g_SAT.freeSegmentSpan(uintptr_t(page) >> sat::SegmentSizeL2, 1);
+        sat::MemoryTable::self.freeSegmentSpan(uintptr_t(page) >> sat::SegmentSizeL2, 1);
         page = page_next;
       }
     }

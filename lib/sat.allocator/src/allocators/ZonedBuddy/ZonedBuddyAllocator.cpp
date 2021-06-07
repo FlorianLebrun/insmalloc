@@ -1,5 +1,5 @@
 #include "./index.h"
-#include "../../controller.h"
+#include "../../base.h"
 
 using namespace ZonedBuddyAllocator;
 
@@ -66,7 +66,7 @@ int ZonedBuddySegment::free(uintptr_t index, uintptr_t ptr) {
       return cache->freePtr(this, ptr);
    }
    else {
-      auto cache = (Global::Cache*)g_SAT.getHeap(this->heapID);
+      auto cache = (Global::Cache*)sat::getHeap(this->heapID);
       return cache->freePtr(this, ptr);
    }
 }

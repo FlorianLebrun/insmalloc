@@ -104,8 +104,8 @@ namespace ScaledBuddySubAllocator {
     }
     Object acquirePage()
     {
-      uintptr_t index = g_SAT.allocSegmentSpan(1);
-      this->initializeSATEntry(g_SAT.get<tSATEntry>(index));
+      uintptr_t index = sat::MemoryTable::self.allocSegmentSpan(1);
+      this->initializeSATEntry(sat::MemoryTable::get<tSATEntry>(index));
       return Object(index << sat::SegmentSizeL2);
     }
     tObjectList acquirePlainZones(int sizeID)
@@ -168,7 +168,7 @@ namespace ScaledBuddySubAllocator {
           scavenge->pop(buddy);
           if (status == STATUS_SCAVENGED(0)) {
             //printf("page free\n");
-            g_SAT.freeSegmentSpan(uintptr_t(obj) >> sat::SegmentSizeL2, 1);
+            sat::MemoryTable::self.freeSegmentSpan(uintptr_t(obj) >> sat::SegmentSizeL2, 1);
           }
           else {
             status = status - 1;

@@ -36,7 +36,7 @@ namespace ScaledBuddySubAllocator {
       // Case 3: Alloc a base zone to split in sub size object
       // --- Get a free zone
       uintptr_t ptr = (uintptr_t)local->plain_cache_3.acquireObject();
-      SATEntry entry = g_SAT.get<tSATEntry>(ptr >> sat::SegmentSizeL2);
+      SATEntry entry = sat::MemoryTable::self.get<tSATEntry>(ptr >> sat::SegmentSizeL2);
       entry->tags[(ptr >> baseSizeL2) & 0xf] = sizeID | cTAG_IS_OBJECT_BIT;
 
       // --- Cache the remain objects

@@ -63,7 +63,7 @@ namespace ScaledBuddySubAllocator {
       const Object obj = this->acquireObject();
 
       // Get object sat entry & index
-      const SATEntry entry = g_SAT.get<tSATEntry>(uintptr_t(obj) >> sat::SegmentSizeL2);
+      const SATEntry entry = sat::MemoryTable::get<tSATEntry>(uintptr_t(obj) >> sat::SegmentSizeL2);
 
       // Tag the entry for this object
       const int index = WriteTags<sizeID, sizeID | cTAG_IS_OBJECT_BIT>::apply(entry, uintptr_t(obj) >> baseSizeL2);

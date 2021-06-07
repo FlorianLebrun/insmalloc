@@ -18,6 +18,6 @@ void test_buffer_alloc() {
 
   ptr = sat_malloc(10);
   ((char*)ptr)[10] = 1;
-  sat_get_contoller()->checkObjectsOverflow();
+  sat::MemoryTableController::self.checkObjectsOverflow();
   sat_free(ptr);
 }

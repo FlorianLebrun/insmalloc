@@ -34,12 +34,12 @@ void test_stack_print() {
          this->spanned = 1;
       }
       void call(int level) {
-         sat::StackBeaconHolder<TestStackBeacon> beacon;
+         TestStackBeacon beacon;
+         sat::StackBeaconHolder holder(beacon);
          if (level % 4 == 2) {
-            beacon.beacon.level = level;
-            beacon.beacon.spanned = this->spanned;
+            beacon.level = level;
+            beacon.spanned = this->spanned;
             this->spanned = !this->spanned;
-            beacon.deploy();
          }
          if (level > 0) {
             call(level - 1);
@@ -47,7 +47,7 @@ void test_stack_print() {
          }
          else {
             auto stackstamp = sat::analysis::getCurrentStackStamp();
-            sat_print_stackstamp(stackstamp);
+            sat::analysis::printStackStamp(stackstamp);
          }
       }
    };

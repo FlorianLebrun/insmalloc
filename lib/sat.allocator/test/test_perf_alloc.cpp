@@ -1,4 +1,5 @@
 #include "./test_perf_alloc.h"
+#include <vector>
 
 struct tTest {
   static const int sizeMin = 10;
@@ -150,7 +151,6 @@ struct tTest {
 
   void test_alloc()
   {
-    sat::Controller* sat = sat_get_contoller();
     sat::Thread* thread = sat::Thread::current();
 
     this->test_sat_malloc_2();
@@ -185,7 +185,6 @@ void test_perf_alloc() {
   ::_tcmalloc();
 #endif
 
-  //test_types();
   //test.test_alloc_perf();
   test.test_alloc();
 }

@@ -1,5 +1,5 @@
 #include "./heaps.h"
-#include "../controller.h"
+#include "../base.h"
 #include <sat/timing.hpp>
 
 using namespace sat;
@@ -111,13 +111,13 @@ GlobalHeap::GlobalHeap(const char* name, int heapID) {
 }
 
 GlobalHeap::~GlobalHeap() {
-   g_SAT.heaps_lock.lock();
-   assert(g_SAT.heaps_table[this->heapID] == this);
-   g_SAT.heaps_table[this->heapID] = 0;
+   sat::heaps_lock.lock();
+   assert(sat::heaps_table[this->heapID] == this);
+   sat::heaps_table[this->heapID] = 0;
    if (this->nextGlobal) this->nextGlobal->backGlobal = this->backGlobal;
    if (this->backGlobal) this->backGlobal->nextGlobal = this->nextGlobal;
-   else g_SAT.heaps_list = this->nextGlobal;
-   g_SAT.heaps_lock.unlock();
+   else sat::heaps_list = this->nextGlobal;
+   sat::heaps_lock.unlock();
 }
 
 const char* GlobalHeap::getName() {

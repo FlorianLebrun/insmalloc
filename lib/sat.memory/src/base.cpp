@@ -140,6 +140,39 @@ void MemoryTableController::printSegments() {
    }
 }
 
+void MemoryTableController::traverseObjects(sat::IObjectVisitor* visitor, uintptr_t start_address) {
+   int i = start_address >> sat::memory::cSegmentSizeL2;
+   bool visitMore = true;
+   while (i < MemoryTableController::self.length && visitMore) {
+      auto controller = MemoryTableController::table[i];
+      if (controller->getHeapID() >= 0) {
+         i += controller->traverseObjects(i, visitor);
+      }
+      else i++;
+   }
+}
+
+bool MemoryTableController::checkObjectsOverflow() {
+   struct Visitor : sat::IObjectVisitor {
+      int objectsCount;
+      int invalidsCount;
+      Visitor() {
+         this->objectsCount = 0;
+         this->invalidsCount = 0;
+      }
+      virtual bool visit(sat::tpObjectInfos obj) override {
+         if (void* overflowPtr = obj->detectOverflow()) {
+            this->invalidsCount++;
+         }
+         this->objectsCount++;
+         return true;
+      }
+   };
+   Visitor visitor;
+   this->traverseObjects(&visitor, 0);
+   return true;
+}
+
 int MemorySegmentController::free(uintptr_t index, uintptr_t ptr) {
    printf("Cannot free ptr in '%s'\n", this->getName());
    return 0;

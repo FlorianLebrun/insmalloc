@@ -1,8 +1,17 @@
+#include "./base.h"
 #include "./allocators/ZonedBuddy/index.h"
 #include "./allocators/LargeObject/index.h"
-#include "./controller.h"
 #include <sat/thread.hpp>
+#include <algorithm>
 #include <iostream>
+
+bool sat::enableObjectTracing = 0;
+bool sat::enableObjectStackTracing = 0;
+bool sat::enableObjectTimeTracing = 0;
+
+sat::SpinLock sat::heaps_lock;
+sat::GlobalHeap* sat::heaps_list = 0;
+sat::GlobalHeap* sat::heaps_table[256] = { 0 };
 
 static sat::tp_malloc _sat_default_malloc = 0;
 static sat::tp_realloc _sat_default_realloc = 0;
@@ -30,7 +39,7 @@ private:
             if (!__current_local_heap) {
                auto global_heap = thread->getObject<sat::GlobalHeap>();
                if (!global_heap) {
-                  global_heap = g_SAT.heaps_table[0];
+                  global_heap = sat::heaps_table[0];
                   global_heap->retain();
                   thread->setObject<sat::GlobalHeap>(global_heap);
                }
@@ -73,7 +82,7 @@ void sat_init_process() {
    if (!is_initialized) {
       is_initialized = true;
       sat::MemoryTableController::self.initialize();
-      g_SAT.initialize();
+      sat::initializeHeaps();
    }
    else printf("sat library is initalized more than once.");
 }
@@ -208,6 +217,49 @@ bool sat_get_address_infos(void* ptr, sat::tpObjectInfos infos) {
    return false;
 }
 
-sat::Controller* sat_get_contoller() {
-   return &g_SAT;
+sat::Heap* sat::getHeap(int id) {
+   if (id >= 0 && id < 256) return sat::heaps_table[id];
+   return 0;
+}
+
+sat::Heap* sat::createHeap(tHeapType type, const char* name) {
+   heaps_lock.lock();
+
+   // Get heap id
+   int heapId = -1;
+   for (int i = 0; i < 256; i++) {
+      if (!sat::heaps_table[i]) {
+         heapId = i;
+         break;
+      }
+   }
+
+   // Create heap
+   GlobalHeap* heap = 0;
+   if (heapId >= 0) {
+      switch (type) {
+      case tHeapType::COMPACT_HEAP_TYPE:
+         heap = sat::createHeapCompact(name);
+         break;
+      }
+      heap->heapID = heapId;
+      sat::heaps_table[heapId] = heap;
+   }
+
+   heaps_lock.unlock();
+   return heap;
+}
+
+void sat::initializeHeaps() {
+   // Init analysis features
+   sat::enableObjectTracing = false;
+   sat::enableObjectStackTracing = false;
+   sat::enableObjectTimeTracing = false;
+
+   // Init heap table
+   sat::heaps_list = 0;
+   memset(sat::heaps_table, sizeof(sat::heaps_table), 0);
+
+   // Create heap 0
+   sat::createHeap(sat::tHeapType::COMPACT_HEAP_TYPE, "main");
 }

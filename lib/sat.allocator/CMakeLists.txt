@@ -12,8 +12,6 @@ append_group_sources(files FILTER "*.cc|*.cpp|*.h|*.hpp" ROOT "./src" DIRECTORIE
   "./heaps"
   "./heaps/Compact"
 
-  "./types"
-
   # Win32 specific
   "./win32"
   "./win32/patcher"
