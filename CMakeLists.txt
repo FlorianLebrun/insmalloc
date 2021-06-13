@@ -22,3 +22,4 @@ set(SATMEM_POST_BUILD_DIRS ${PROJECT_DEV_DIR})
 # Add projects
 add_subdirectory("./thirdparty/boost")
 add_subdirectory("./lib")
+add_subdirectory("./shared")

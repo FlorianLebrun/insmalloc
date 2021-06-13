@@ -1,15 +1,14 @@
 
 # Add projects
-add_subdirectory("./sat.memory")
-add_subdirectory("./sat.allocator")
-add_subdirectory("./sat.stack-analysis")
-add_subdirectory("./sat.threads")
-add_subdirectory("./shared")
+add_subdirectory("./memory")
+add_subdirectory("./allocator")
+add_subdirectory("./stack-analysis")
+add_subdirectory("./threads")
 
 # Add tests projects
 if(ENABLE_TESTS)
-add_subdirectory("./sat.memory/test")
-add_subdirectory("./sat.allocator/test")
-add_subdirectory("./sat.stack-analysis/test")
-add_subdirectory("./sat.threads/test")
+add_subdirectory("./memory/test")
+add_subdirectory("./allocator/test")
+add_subdirectory("./stack-analysis/test")
+add_subdirectory("./threads/test")
 endif()
