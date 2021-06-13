@@ -57,6 +57,13 @@ namespace sat {
       this->allocated_segments = 0;
    }
 
+   void SegmentsAllocator::handleOutOfMemory() {
+      printf("----- out of memory -----\n");
+      //this->freespans.display();
+      sat::MemoryTableController::self.printSegments();
+      throw std::exception("out of memory");
+   }
+
    uintptr_t SegmentsAllocator::allocSegments(uintptr_t size, uintptr_t alignL2) {
       uintptr_t spanIndex = 0, spanSize = 0;
 
@@ -67,8 +74,8 @@ namespace sat {
          // Get a free span from memory tree
          uint64_t spanKey = 0;
          if (!this->freespans.removeUpper(MakeKeyFromSize(size), spanKey)) {
-            this->freespans.display();
-            throw std::exception("out of memory");
+            this->handleOutOfMemory();
+            return 0;
          }
 
          // Reserved the span

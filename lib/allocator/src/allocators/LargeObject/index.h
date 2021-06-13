@@ -14,6 +14,7 @@ namespace LargeObjectAllocator {
       virtual int free(uintptr_t index, uintptr_t ptr) override;
       virtual bool getAddressInfos(uintptr_t index, uintptr_t ptr, sat::tpObjectInfos infos) override;
       virtual int traverseObjects(uintptr_t index, sat::IObjectVisitor* visitor) override;
+      virtual int getHeapID() override { return this->heapID; }
    };
 
    struct Global : public sat::ObjectAllocator {

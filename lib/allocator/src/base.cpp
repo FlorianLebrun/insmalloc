@@ -44,6 +44,7 @@ private:
                   thread->setObject<sat::GlobalHeap>(global_heap);
                }
                __current_local_heap = global_heap->createLocal();
+               thread->setObject<sat::LocalHeap>(__current_local_heap);
             }
          }
       }

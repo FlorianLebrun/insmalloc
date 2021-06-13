@@ -31,7 +31,8 @@ void MemoryTableController::initialize() {
    // Compute memory limit
    uintptr_t memoryLimit = SystemMemory::GetMemorySize();
    if (sizeof(uintptr_t) > 4) {
-      memoryLimit = std::min<uintptr_t>(uintptr_t(10000000000), memoryLimit);
+      const uintptr_t Mb = uintptr_t(1024 * 1024);
+      memoryLimit = std::min<uintptr_t>(uintptr_t(10000) * Mb, memoryLimit);
    }
 
    // Check memory page size
@@ -116,28 +117,41 @@ void* sat::memory::allocSystemBuffer(sizeID_t sizeID) {
 
 void sat::memory::freeSystemBuffer(void* ptr, sizeID_t sizeID) {
    return system_allocator.freeBufferSpanL2(ptr, sizeID);
-   
+
 }
 
-static uintptr_t SATEntryToString(uintptr_t index, char* out) {
+static uintptr_t SATEntryToString(uintptr_t index) {
    using namespace sat::memory;
    auto& entry = MemoryTableController::table[index];
    uintptr_t len;
    for (len = 0; (index + len) < MemoryTableController::self.length && MemoryTableController::table[index + len] == entry; len++);
+
    std::string name = entry->getName();
-   sprintf_s(out, 512, "[ %.5d to %.5d ] %s", uint32_t(index), uint32_t(index + len - 1), name.c_str());
+   printf("\n[ %.5d to %.5d ] %s", uint32_t(index), uint32_t(index + len - 1), name.c_str());
+
+   auto heapID = entry->getHeapID();
+   if (heapID >= 0) {
+      struct Visitor : sat::IObjectVisitor {
+         int objectsCount = 0;
+         virtual bool visit(sat::tpObjectInfos obj) override {
+            this->objectsCount++;
+            return true;
+         }
+      } visitor;
+      entry->traverseObjects(index, &visitor);
+      printf(" / heap=%d, objects=%d", heapID, visitor.objectsCount);
+   }
    return len;
 }
 
 void MemoryTableController::printSegments() {
-   char bout[512];
    uintptr_t i = 0;
    std::string name;
-   printf("\nSegment Allocation Table:\n");
+   printf("\nSegment Allocation Table:");
    while (i < MemoryTableController::self.length) {
-      i += SATEntryToString(i, bout);
-      printf("%s\n", bout);
+      i += SATEntryToString(i);
    }
+   printf("\n");
 }
 
 void MemoryTableController::traverseObjects(sat::IObjectVisitor* visitor, uintptr_t start_address) {
@@ -154,12 +168,8 @@ void MemoryTableController::traverseObjects(sat::IObjectVisitor* visitor, uintpt
 
 bool MemoryTableController::checkObjectsOverflow() {
    struct Visitor : sat::IObjectVisitor {
-      int objectsCount;
-      int invalidsCount;
-      Visitor() {
-         this->objectsCount = 0;
-         this->invalidsCount = 0;
-      }
+      size_t objectsCount = 0;
+      size_t invalidsCount = 0;
       virtual bool visit(sat::tpObjectInfos obj) override {
          if (void* overflowPtr = obj->detectOverflow()) {
             this->invalidsCount++;
@@ -167,8 +177,7 @@ bool MemoryTableController::checkObjectsOverflow() {
          this->objectsCount++;
          return true;
       }
-   };
-   Visitor visitor;
+   } visitor;
    this->traverseObjects(&visitor, 0);
    return true;
 }

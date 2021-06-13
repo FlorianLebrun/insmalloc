@@ -26,6 +26,7 @@ namespace sat {
       uintptr_t allocSegments(uintptr_t size, uintptr_t alignL2 = 1);
       void freeSegments(uintptr_t index, uintptr_t size);
       void appendSegments(uintptr_t index, uintptr_t size);
+      void handleOutOfMemory();
    };
 }
 
