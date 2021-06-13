@@ -1,7 +1,7 @@
 set(target libsat)
 
 # Create library
-add_packaged_shared_library(${target} SHARED main.cpp API "SAT_API" LIBS "sat.threads" "sat.memory" "sat.allocator" "sat.stack-analysis")
+add_packaged_shared_library(${target} SHARED main.cpp API "SAT_API" LIBS "sat.threads" "sat.memory" "sat.heaps" "sat.stack-analysis")
 set_target_properties(${target} PROPERTIES FOLDER "Shared")
 
 # Setting for development comfort

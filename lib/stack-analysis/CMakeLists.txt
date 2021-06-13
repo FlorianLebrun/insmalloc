@@ -20,4 +20,4 @@ target_compile_definitions(${target} PRIVATE "SAT_API=__declspec(dllexport)")
 
 # Set link properties
 target_link_libraries(${target} PRIVATE boost)
-target_link_libraries(${target} PUBLIC sat.threads sat.memory sat.allocator)
+target_link_libraries(${target} PUBLIC sat.threads sat.memory sat.heaps)

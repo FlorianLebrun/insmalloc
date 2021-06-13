@@ -1,4 +1,4 @@
-set(target test-sat.allocator)
+set(target test-sat.heaps)
 
 # Collect source files
 append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" DIRECTORIES "./")

@@ -9,7 +9,7 @@ using namespace sat;
 void PooledBuffers64Controller::initialize() {
 
    // Allocate buffer 64
-   uintptr_t buffer64_size = 1024 * 4;
+   uintptr_t buffer64_size = 1024 * 10;
    uintptr_t buffer64_index = MemoryTableController::self.allocSegmentSpan(buffer64_size);
    if (!buffer64_index) throw std::exception("map on reserved segment has failed");
    this->Cursor = tpBuffer64(buffer64_index << sat::memory::cSegmentSizeL2);

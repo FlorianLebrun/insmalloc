@@ -20,7 +20,6 @@ namespace SystemMemory {
 
   uintptr_t AllocBuffer(uintptr_t base, uintptr_t limit, uintptr_t size, uintptr_t alignement);
 
-  bool AllocMemory(uintptr_t base, uintptr_t size);
   bool ReserveMemory(uintptr_t base, uintptr_t size);
   bool CommitMemory(uintptr_t base, uintptr_t size);
   bool DecommitMemory(uintptr_t base, uintptr_t size);

@@ -1,4 +1,4 @@
-set(target sat.allocator)
+set(target sat.heaps)
 
 # Collect source files
 append_group_sources(files FILTER "*.cc|*.cpp|*.h|*.hpp" ROOT "./src" DIRECTORIES 
@@ -16,7 +16,7 @@ append_group_sources(files FILTER "*.cc|*.cpp|*.h|*.hpp" ROOT "./src" DIRECTORIE
   "./win32"
   "./win32/patcher"
 )
-append_group_sources(files FILTER "*.h|*.hpp" GROUP "Include" ROOT "${CMAKE_SOURCE_DIR}/include" DIRECTORIES "./sat/allocator")
+append_group_sources(files FILTER "*.h|*.hpp" GROUP "Include" ROOT "${CMAKE_SOURCE_DIR}/include" DIRECTORIES "./sat/heaps")
 
 # Create library
 add_library(${target} STATIC ${files})
