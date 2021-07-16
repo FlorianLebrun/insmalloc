@@ -1,4 +1,4 @@
-#include <sat/heaps/allocator.hpp>
+#include <sat/memory/allocator.hpp>
 #include "./utils.h"
 
 void test_meta_alloc() {
@@ -18,6 +18,6 @@ void test_buffer_alloc() {
 
   ptr = sat_malloc(10);
   ((char*)ptr)[10] = 1;
-  sat::MemoryTableController::self.checkObjectsOverflow();
+  sat::memory::checkObjectsOverflow();
   sat_free(ptr);
 }

@@ -83,7 +83,7 @@ namespace ZonedBuddyAllocator {
             obj->status = STATUS_ALLOCATE(sizeID);
 
             // Tag the entry for this object
-            auto entry = sat::MemoryTableController::get<ZonedBuddySegment>(uintptr_t(obj) >> sat::memory::cSegmentSizeL2);
+            auto entry = sat::memory::table.get<ZonedBuddySegment>(uintptr_t(obj) >> sat::memory::cSegmentSizeL2);
             WriteTags<sizeID, sizeID | cTAG_ALLOCATED_BIT>::apply(entry, uintptr_t(obj) >> baseSizeL2);
 
             return ptr;
@@ -102,7 +102,7 @@ namespace ZonedBuddyAllocator {
             obj->status = STATUS_ALLOCATE(sizeID);
 
             // Tag the entry for this object
-            auto entry = sat::MemoryTableController::get<ZonedBuddySegment>(uintptr_t(obj) >> sat::memory::cSegmentSizeL2);
+            auto entry = sat::memory::table.get<ZonedBuddySegment>(uintptr_t(obj) >> sat::memory::cSegmentSizeL2);
             WriteTags<sizeID, sizeID | cTAG_ALLOCATED_BIT>::apply(entry, uintptr_t(obj) >> baseSizeL2);
 
             return ptr;

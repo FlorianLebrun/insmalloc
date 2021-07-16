@@ -1,5 +1,5 @@
 #pragma once
-#include <sat/heaps/allocator.hpp>
+#include <sat/memory/allocator.hpp>
 #include <sat/threads/spinlock.hpp>
 #include "./AllocatorSizeMapping.h"
 

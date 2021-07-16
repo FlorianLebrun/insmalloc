@@ -8,7 +8,7 @@ namespace sat {
    {
    }
    StackProfiling* StackProfiling::create() {
-      uintptr_t index = sat::MemoryTableController::self.allocSegmentSpan(1);
+      uintptr_t index = sat::memory::allocSegmentSpan(1);
       auto object = (StackProfiling*)(index << memory::cSegmentSizeL2);
       object->StackProfiling::StackProfiling();
       return object;

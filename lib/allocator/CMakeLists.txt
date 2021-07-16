@@ -7,16 +7,19 @@ append_group_sources(files FILTER "*.cc|*.cpp|*.h|*.hpp" ROOT "./src" DIRECTORIE
   "./allocators"
   "./allocators/LargeObject"
   "./allocators/ZonedBuddy"
-  #"./allocators/Buddy"
+  "./allocators/Slabbing"
+  "./allocators/Buddy"
+  "./allocators/ThreadedPageClass"
 
   "./heaps"
   "./heaps/Compact"
+  "./heaps/System"
 
   # Win32 specific
   "./win32"
   "./win32/patcher"
 )
-append_group_sources(files FILTER "*.h|*.hpp" GROUP "Include" ROOT "${CMAKE_SOURCE_DIR}/include" DIRECTORIES "./sat/heaps")
+append_group_sources(files FILTER "*.h|*.hpp" GROUP "Include" ROOT "../../include/sat" DIRECTORIES "./heaps")
 
 # Create library
 add_library(${target} STATIC ${files})

@@ -74,9 +74,6 @@ namespace ZonedBuddyAllocator {
       virtual int traverseObjects(uintptr_t index, sat::IObjectVisitor* visitor) override;
       virtual int getHeapID() override { return this->heapID; }
    };
-
-   uintptr_t traversePageObjects(uintptr_t index, bool& visitMore, sat::IObjectVisitor* visitor);
-   bool get_address_infos(uintptr_t ptr, sat::tpObjectInfos infos);
 }
 
 #include "utils.h"

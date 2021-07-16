@@ -82,7 +82,7 @@ void _sat_set_default_allocator(
 void sat_init_process() {
    if (!is_initialized) {
       is_initialized = true;
-      sat::MemoryTableController::self.initialize();
+      sat::memory::table.initialize();
       sat::initializeHeaps();
    }
    else printf("sat library is initalized more than once.");
@@ -200,10 +200,10 @@ void* sat_realloc(void* ptr, size_t size, sat::tp_realloc default_realloc) {
    }
 }
 
-void sat_free(void* ptr, sat::tp_free default_free) {
+void sat_free(void* ptr) {
    uintptr_t index = uintptr_t(ptr) >> sat::memory::cSegmentSizeL2;
-   if (index < sat::MemoryTableController::self.length) {
-      auto entry = sat::MemoryTableController::table[index];
+   if (index < sat::memory::table.length) {
+      auto entry = sat::memory::table[index];
       entry->free(index, uintptr_t(ptr));
    }
    else printf("sat_free: out of range pointer %.12llX\n", int64_t(ptr));
@@ -211,8 +211,8 @@ void sat_free(void* ptr, sat::tp_free default_free) {
 
 bool sat_get_address_infos(void* ptr, sat::tpObjectInfos infos) {
    uintptr_t index = uintptr_t(ptr) >> sat::memory::cSegmentSizeL2;
-   if (index < sat::MemoryTableController::self.length) {
-      auto entry = sat::MemoryTableController::table[index];
+   if (index < sat::memory::table.length) {
+      auto entry = sat::memory::table[index];
       return entry->getAddressInfos(index, uintptr_t(ptr), infos);
    }
    return false;
@@ -252,6 +252,7 @@ sat::Heap* sat::createHeap(tHeapType type, const char* name) {
 }
 
 void sat::initializeHeaps() {
+
    // Init analysis features
    sat::enableObjectTracing = false;
    sat::enableObjectStackTracing = false;

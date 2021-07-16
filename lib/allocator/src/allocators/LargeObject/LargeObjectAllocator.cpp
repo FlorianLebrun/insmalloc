@@ -12,10 +12,9 @@ const char* LargeObjectAllocator::LargeObjectSegment::getName() {
 }
 
 int LargeObjectAllocator::LargeObjectSegment::free(uintptr_t index, uintptr_t ptr) {
-   volatile auto entry = this;
-   assert(entry->index == 0);
-   size_t length = entry->length;
-   sat::MemoryTableController::self.freeSegmentSpan(index, length);
+   _ASSERT(this->index == index);
+   volatile size_t length = this->length;
+   sat::memory::freeSegmentSpan(index, length);
    return length << sat::memory::cSegmentSizeL2;
 }
 
@@ -47,19 +46,19 @@ void* LargeObjectAllocator::Global::allocateWithMeta(size_t size, uint64_t meta)
 
    // Allocate memory space
    uint32_t length = alignX<int32_t>(size + sizeof(LargeObjectSegment), sat::memory::cSegmentSize) >> sat::memory::cSegmentSizeL2;
-   uintptr_t index = sat::MemoryTableController::self.allocSegmentSpan(length);
+   uintptr_t index = sat::memory::allocSegmentSpan(length);
 
    // Install controller
    auto controller = new((void*)(index << sat::memory::cSegmentSizeL2)) LargeObjectSegment(this->heapID, index, length, meta);
    for (uint32_t i = 0; i < length; i++) {
-      sat::MemoryTableController::table[i] = controller;
+      sat::memory::table[index + i] = controller;
    }
 
    return &controller[1];
 }
 
 size_t LargeObjectAllocator::Global::getMaxAllocatedSize() {
-   return sat::MemoryTableController::self.limit << sat::memory::cSegmentSizeL2;
+   return sat::memory::table.limit << sat::memory::cSegmentSizeL2;
 }
 
 size_t LargeObjectAllocator::Global::getMinAllocatedSize() {

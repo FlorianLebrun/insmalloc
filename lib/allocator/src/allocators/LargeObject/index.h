@@ -32,6 +32,4 @@ namespace LargeObjectAllocator {
       virtual size_t getAllocatedSizeWithMeta(size_t size) override;
       virtual void* allocateWithMeta(size_t size, uint64_t meta) override;
    };
-
-   bool get_address_infos(uintptr_t ptr, sat::tpObjectInfos infos);
 }

@@ -1,26 +1,14 @@
 #include "./segments-allocator.hpp"
-#include "./memory-buffers64.hpp"
 #include "./win32/system.h"
 #include "../../common/alignment.h"
 #include "../../common/bitwise.h"
-#include <sat/memory/system-object.hpp>
 #include <algorithm>
 #include <string>
 
-using namespace sat;
+sat::MemoryTable sat::memory::table;
 
-MemoryTableEntry* MemoryTableController::table = 0;
-MemoryTableController MemoryTableController::self;
-
-static SegmentsAllocator segments_allocator;
-static PooledBuffers64Controller system_allocator;
-
-const char* MemoryTableController::getName() {
-   return "SAT";
-}
-
-void MemoryTableController::initialize() {
-   if (this->table) {
+void sat::MemoryTable::initialize() {
+   if (this->entries) {
       printf("sat allocator is initalized more than once.");
       return;
    }
@@ -41,60 +29,57 @@ void MemoryTableController::initialize() {
    }
 
    // Initialize the table sizeings
-   uintptr_t size = alignX<intptr_t>(sizeof(MemoryTableEntry) * (memoryLimit >> sat::memory::cSegmentSizeL2), sat::memory::cSegmentSize);
-   this->limit = size / sizeof(MemoryTableEntry);
+   uintptr_t size = alignX<intptr_t>(sizeof(MemoryTable::Entry) * (memoryLimit >> sat::memory::cSegmentSizeL2), sat::memory::cSegmentSize);
+   this->limit = size / sizeof(MemoryTable::Entry);
    this->length = this->limit;
    this->bytesPerSegmentL2 = sat::memory::cSegmentSizeL2;
    this->bytesPerAddress = sizeof(uintptr_t);
 
    // Create the table
-   this->table = (MemoryTableEntry*)SystemMemory::AllocBuffer(sat::memory::cSegmentMinAddress, memoryLimit, size, sat::memory::cSegmentSize);
-   memset(this->table, 0xff, size);
+   this->entries = (MemoryTable::Entry*)SystemMemory::AllocBuffer(sat::memory::cSegmentMinAddress, memoryLimit, size, sat::memory::cSegmentSize);
+   memset(this->entries, 0xff, size);
 
    // Mark the Forbidden zone
    for (uintptr_t i = 0; i < sat::memory::cSegmentMinIndex; i++) {
-      this->table[i] = &ForbiddenSegmentController::self;
+      this->entries[i] = &ForbiddenSegmentController::self;
    }
 
    // Mark the sat with itself
-   uintptr_t SATIndex = uintptr_t(this->table) >> sat::memory::cSegmentSizeL2;
+   uintptr_t SATIndex = uintptr_t(this->entries) >> sat::memory::cSegmentSizeL2;
    uintptr_t SATSize = size >> sat::memory::cSegmentSizeL2;
    for (uintptr_t i = 0; i < SATSize; i++) {
-      this->table[SATIndex + i] = &MemoryTableController::self;
+      this->entries[SATIndex + i] = &MemoryTableController::self;
    }
 
    // Mark free pages
    segments_allocator.appendSegments(sat::memory::cSegmentMinIndex, SATIndex - sat::memory::cSegmentMinIndex);
    segments_allocator.appendSegments(SATIndex + SATSize, this->limit - SATIndex - SATSize);
-
-   // Allocate buffer 64
-   system_allocator.initialize();
 }
 
-uintptr_t MemoryTableController::allocSegmentSpan(uintptr_t size) {
-   uintptr_t index = segments_allocator.allocSegments(size, 1);
-   this->commitMemory(index, size);
+uintptr_t sat::memory::allocSegmentSpan(uintptr_t size) {
+   uintptr_t index = segments_allocator.allocSegments(size);
+   sat::memory::commitMemory(index, size);
    return index;
 }
 
-void MemoryTableController::freeSegmentSpan(uintptr_t index, uintptr_t size) {
+void sat::memory::freeSegmentSpan(uintptr_t index, uintptr_t size) {
    _ASSERT(size > 0);
-   this->decommitMemory(index, size);
+   sat::memory::decommitMemory(index, size);
    segments_allocator.freeSegments(index, size);
 }
 
-void MemoryTableController::commitMemory(uintptr_t index, uintptr_t size) {
+void sat::memory::commitMemory(uintptr_t index, uintptr_t size) {
    uintptr_t ptr = index << sat::memory::cSegmentSizeL2;
 
    // Commit the segment memory
    if (!SystemMemory::CommitMemory(ptr, size << sat::memory::cSegmentSizeL2)) {
-      this->printSegments();
+      sat::memory::table.print();
       throw std::exception("commit on reserved segment has failed");
    }
 
 }
 
-void MemoryTableController::decommitMemory(uintptr_t index, uintptr_t size) {
+void sat::memory::decommitMemory(uintptr_t index, uintptr_t size) {
    uintptr_t ptr = index << sat::memory::cSegmentSizeL2;
 
    // Commit the segment memory
@@ -103,31 +88,13 @@ void MemoryTableController::decommitMemory(uintptr_t index, uintptr_t size) {
    }
 }
 
-uintptr_t MemoryTableController::reserveMemory(uintptr_t size, uintptr_t alignL2) {
-   return segments_allocator.allocSegments(size, alignL2);
-}
-
-sat::memory::sizeID_t sat::memory::getSystemSizeID(size_t size) {
-   return sizeID_t::with(msb_32(uint32_t(size)) + 1);
-}
-
-void* sat::memory::allocSystemBuffer(sizeID_t sizeID) {
-   return system_allocator.allocBufferSpanL2(sizeID);
-}
-
-void sat::memory::freeSystemBuffer(void* ptr, sizeID_t sizeID) {
-   return system_allocator.freeBufferSpanL2(ptr, sizeID);
-
-}
-
 static uintptr_t SATEntryToString(uintptr_t index) {
-   using namespace sat::memory;
-   auto& entry = MemoryTableController::table[index];
+   auto& entry = sat::memory::table[index];
    uintptr_t len;
-   for (len = 0; (index + len) < MemoryTableController::self.length && MemoryTableController::table[index + len] == entry; len++);
+   for (len = 0; (index + len) < sat::memory::table.length && sat::memory::table[index + len] == entry; len++);
 
    std::string name = entry->getName();
-   printf("\n[ %.5d to %.5d ] %s", uint32_t(index), uint32_t(index + len - 1), name.c_str());
+   printf("\n[0x%.6X0000] %8.0lf Kb %s", uint32_t(index), double(len * 64), name.c_str());
 
    auto heapID = entry->getHeapID();
    if (heapID >= 0) {
@@ -144,21 +111,22 @@ static uintptr_t SATEntryToString(uintptr_t index) {
    return len;
 }
 
-void MemoryTableController::printSegments() {
+void sat::MemoryTable::print() {
    uintptr_t i = 0;
    std::string name;
    printf("\nSegment Allocation Table:");
-   while (i < MemoryTableController::self.length) {
+   while (i < this->length) {
       i += SATEntryToString(i);
    }
    printf("\n");
+   segments_allocator.print();
 }
 
-void MemoryTableController::traverseObjects(sat::IObjectVisitor* visitor, uintptr_t start_address) {
+void sat::memory::traverseObjects(sat::IObjectVisitor* visitor, uintptr_t start_address) {
    int i = start_address >> sat::memory::cSegmentSizeL2;
    bool visitMore = true;
-   while (i < MemoryTableController::self.length && visitMore) {
-      auto controller = MemoryTableController::table[i];
+   while (i < sat::memory::table.length && visitMore) {
+      auto controller = sat::memory::table[i];
       if (controller->getHeapID() >= 0) {
          i += controller->traverseObjects(i, visitor);
       }
@@ -166,7 +134,7 @@ void MemoryTableController::traverseObjects(sat::IObjectVisitor* visitor, uintpt
    }
 }
 
-bool MemoryTableController::checkObjectsOverflow() {
+bool sat::memory::checkObjectsOverflow() {
    struct Visitor : sat::IObjectVisitor {
       size_t objectsCount = 0;
       size_t invalidsCount = 0;
@@ -178,30 +146,24 @@ bool MemoryTableController::checkObjectsOverflow() {
          return true;
       }
    } visitor;
-   this->traverseObjects(&visitor, 0);
+   sat::memory::traverseObjects(&visitor, 0);
    return true;
 }
 
-int MemorySegmentController::free(uintptr_t index, uintptr_t ptr) {
+int sat::MemorySegmentController::free(uintptr_t index, uintptr_t ptr) {
    printf("Cannot free ptr in '%s'\n", this->getName());
    return 0;
 }
 
-FreeSegmentController FreeSegmentController::self;
+sat::MemoryTableController sat::MemoryTableController::self;
 
-const char* FreeSegmentController::getName() {
-   return "FREE";
+const char* sat::MemoryTableController::getName() {
+   return "SAT";
 }
 
-ReservedSegmentController ReservedSegmentController::self;
+sat::ForbiddenSegmentController sat::ForbiddenSegmentController::self;
 
-const char* ReservedSegmentController::getName() {
-   return "FREE-RESERVED";
-}
-
-ForbiddenSegmentController ForbiddenSegmentController::self;
-
-const char* ForbiddenSegmentController::getName() {
+const char* sat::ForbiddenSegmentController::getName() {
    return "FORBIDDEN";
 }
 

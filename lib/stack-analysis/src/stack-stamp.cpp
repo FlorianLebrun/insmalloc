@@ -15,7 +15,7 @@ namespace sat {
    }
 
    StackStampDatabase* StackStampDatabase::create() {
-      uintptr_t index = sat::MemoryTableController::self.allocSegmentSpan(1);
+      uintptr_t index = sat::memory::allocSegmentSpan(1);
       auto object = (StackStampDatabase*)(index << memory::cSegmentSizeL2);
       object->StackStampDatabase::StackStampDatabase(uintptr_t(&object[1]));
       return object;

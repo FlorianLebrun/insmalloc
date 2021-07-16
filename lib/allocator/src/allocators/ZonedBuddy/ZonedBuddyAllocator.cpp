@@ -157,7 +157,7 @@ int ZonedBuddySegment::traverseObjects(uintptr_t index, sat::IObjectVisitor* vis
          }
       }
       uintptr_t traversePageObjects(uintptr_t index, bool& visitMore, sat::IObjectVisitor* visitor) {
-         auto entry = sat::MemoryTableController::get<ZonedBuddySegment>(index);
+         auto entry = sat::memory::table.get<ZonedBuddySegment>(index);
          uintptr_t base = index << sat::memory::cSegmentSizeL2;
          for (int i = 0; i < 16 && visitMore;) {
             int tag = entry->tags[i];

@@ -131,11 +131,11 @@ uintptr_t GlobalHeap::acquireSlot(void* value)  {
 }
 
 uintptr_t GlobalHeap::acquirePages(size_t size) {
-   return sat::MemoryTableController::self.allocSegmentSpan(size);
+   return sat::memory::allocSegmentSpan(size);
 }
 
 void GlobalHeap::releasePages(uintptr_t index, size_t size) {
-   return sat::MemoryTableController::self.freeSegmentSpan(index, size);
+   return sat::memory::freeSegmentSpan(index, size);
 }
 
 LocalHeap::LocalHeap(GlobalHeap* global) {
@@ -162,10 +162,10 @@ const char* LocalHeap::getName() {
 }
 
 uintptr_t LocalHeap::acquirePages(size_t size) {
-   return sat::MemoryTableController::self.allocSegmentSpan(size);
+   return sat::memory::allocSegmentSpan(size);
 }
 
 void LocalHeap::releasePages(uintptr_t index, size_t size) {
-   return sat::MemoryTableController::self.freeSegmentSpan(index, size);
+   return sat::memory::freeSegmentSpan(index, size);
 }
 

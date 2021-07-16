@@ -19,8 +19,7 @@ namespace ZonedBuddyAllocator {
          uintptr_t acquirePage() {
 
             // Create segment controller
-            auto entrySizeId = sat::memory::getSystemSizeID(sizeof(ZonedBuddySegment));
-            auto entry = new(sat::memory::allocSystemBuffer(entrySizeId)) ZonedBuddySegment();
+            auto entry = new(sat::system_object::allocSystemBuffer(sizeof(ZonedBuddySegment))) ZonedBuddySegment();
             entry->heapID = this->pageHeapID;
             entry->heapSlot = this->pageHeapSlot;
             ((uint64_t*)entry->tags)[0] = 0;
@@ -28,19 +27,18 @@ namespace ZonedBuddyAllocator {
 
             // Allocate segment
             uintptr_t index = this->pageHeap->acquirePages(1);
-            sat::MemoryTableController::set(index, entry);
+            sat::memory::table[index] = entry;
             return uintptr_t(index << sat::memory::cSegmentSizeL2);
          }
          void releasePage(uintptr_t ptr) {
 
             // Free segment
             uintptr_t index = uintptr_t(ptr) >> sat::memory::cSegmentSizeL2;
-            auto entry = sat::MemoryTableController::get<ZonedBuddySegment>(index);
+            auto entry = sat::memory::table.get<ZonedBuddySegment>(index);
             this->pageHeap->releasePages(index, 1);
 
             // Delete segment controller
-            auto entrySizeId = sat::memory::getSystemSizeID(sizeof(ZonedBuddySegment));
-            sat::memory::freeSystemBuffer(entry, entrySizeId);
+            sat_free(entry);
          }
       };
    }

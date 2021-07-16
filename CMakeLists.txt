@@ -12,14 +12,11 @@ execute_process(COMMAND cmd /c npm install WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 endif()
 include(${NODE_TOOLS}/index.cmake)
 
-# Set Global compilation options
-add_compile_definitions(WINVER=0x0600)
-add_compile_definitions(_WIN32_WINNT=0x0600)
-
 # Setting for development comfort
 set(SATMEM_POST_BUILD_DIRS ${PROJECT_DEV_DIR})
 
 # Add projects
+add_subdirectory("./thirdparty/mimalloc-1-cpp")
 add_subdirectory("./thirdparty/boost")
 add_subdirectory("./lib")
 add_subdirectory("./shared")

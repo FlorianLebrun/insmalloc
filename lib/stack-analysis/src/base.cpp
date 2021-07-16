@@ -1,5 +1,5 @@
 #include <sat/stack-analysis/stack_analysis.hpp>
-#include <sat/heaps/allocator.hpp>
+#include <sat/memory/allocator.hpp>
 #include "./stack-stamp.h"
 #include "./stack-profiler.h"
 #include "./thread-stack-tracker.h"

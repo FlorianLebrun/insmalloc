@@ -30,7 +30,7 @@ namespace sat {
             firstSegmentBuffer = alignX(8, firstSegmentBuffer);
             this->buffer_base = (char*)firstSegmentBuffer;
             this->buffer_size = sat::memory::cSegmentSize - (firstSegmentBuffer & sat::memory::cSegmentOffsetMask);
-            sat::MemoryTableController::set<>(firstSegmentBuffer >> sat::memory::cSegmentSizeL2, this->controller);
+            sat::memory::table[firstSegmentBuffer >> sat::memory::cSegmentSizeL2] = this->controller;
          }
          else {
             this->buffer_base = 0;
@@ -96,8 +96,8 @@ namespace sat {
          char* ptr;
          this->buffer_lock.lock();
          if (this->buffer_size < size) {
-            uintptr_t index = sat::MemoryTableController::self.allocSegmentSpan(1);
-            sat::MemoryTableController::set<>(index, this->controller);
+            uintptr_t index = sat::memory::allocSegmentSpan(1);
+            sat::memory::table[index] = this->controller;
             ptr = (char*)(index << sat::memory::cSegmentSizeL2);
             this->buffer_base = ptr + size;
             this->buffer_size = sat::memory::cSegmentSize - size;

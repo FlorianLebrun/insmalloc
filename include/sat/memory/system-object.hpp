@@ -3,28 +3,15 @@
 #include <stdint.h>
 #include <assert.h>
 
+extern"C" SAT_API void sat_free(void* ptr);
+
 namespace sat {
 
    // System allocator
    // ------------------------------------------
-   namespace memory {
+   namespace system_object {
 
-      class sizeID_t {
-         uint32_t value;
-         sizeID_t(uint32_t value) : value(value) {}
-      public:
-         static sizeID_t with(uint32_t value) { return sizeID_t(value); }
-         operator uint32_t() { return value; }
-      };
-
-      SAT_API sizeID_t getSystemSizeID(size_t size);
-      SAT_API void* allocSystemBuffer(sizeID_t sizeID);
-      SAT_API void freeSystemBuffer(void* ptr, sizeID_t sizeID);
-
-      template <typename T>
-      void* allocSystemBuffer() {
-         return allocSystemBuffer(getSystemSizeID(sizeof(T)));
-      }
+      SAT_API void* allocSystemBuffer(size_t size);
 
       template <class T, class Base>
       class AllocableSystemClass : public Base {
@@ -38,12 +25,12 @@ namespace sat {
          }
          void* operator new(size_t size) {
             _ASSERT(size == sizeof(T));
-            return allocSystemBuffer(getSystemSizeID(sizeof(T)));
+            return (T*)allocSystemBuffer(sizeof(T));
          }
          void operator delete(void* ptr) {
             auto* obj = (T*)ptr;
             _ASSERT(obj->getSize() == sizeof(T));
-            return freeSystemBuffer(ptr, getSystemSizeID(sizeof(T)));
+            return sat_free(ptr);
          }
 
          template <typename Tc>
@@ -54,7 +41,6 @@ namespace sat {
             }
          };
       };
-
    }
 
    // System object base
@@ -69,7 +55,7 @@ namespace sat {
    };
 
    template <class Base = ISystemObject>
-   class SystemObject : public memory::AllocableSystemClass<SystemObject<Base>, Base> {
+   class SystemObject : public system_object::AllocableSystemClass<SystemObject<Base>, Base> {
    protected:
       std::atomic_uint32_t numRefs = 1;
    public:

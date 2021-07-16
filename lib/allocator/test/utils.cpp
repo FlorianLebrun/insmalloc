@@ -39,3 +39,7 @@ uint64_t Chrono::GetFreq() {
 	return freq;
 }
 
+
+void wait_ms(size_t ms) {
+	Sleep(ms);
+}

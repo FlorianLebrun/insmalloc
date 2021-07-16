@@ -50,7 +50,7 @@ namespace ZonedBuddyAllocator {
 
             // --- Retag the sat entries for this object
             if (sizeID < baseCountL2) {
-               auto entry = sat::MemoryTableController::get<ZonedBuddySegment>(uintptr_t(zone) >> sat::memory::cSegmentSizeL2);
+               auto entry = sat::memory::table.get<ZonedBuddySegment>(uintptr_t(zone) >> sat::memory::cSegmentSizeL2);
                WriteTags<sizeID, sizeID | cTAG_ALLOCATED_BIT>::apply(entry, uintptr_t(zone) >> baseSizeL2);
             }
 
