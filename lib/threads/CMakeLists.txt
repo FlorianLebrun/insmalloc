@@ -5,7 +5,7 @@ append_group_sources(files FILTER "*.cc|*.cpp|*.h|*.hpp" ROOT "./src" DIRECTORIE
   "./"
   "./worker"
 )
-append_group_sources(files FILTER "*.h|*.hpp" GROUP "Include" ROOT "${CMAKE_SOURCE_DIR}/include" DIRECTORIES "./sat/threads")
+append_group_sources(files FILTER "*.h|*.hpp" GROUP "Include" ROOT "${CMAKE_SOURCE_DIR}/include" DIRECTORIES "./")
 
 # Create library
 add_library(${target} STATIC ${files})
