@@ -1,0 +1,4 @@
+/.build*
+/.delivery
+/.output
+node_modules
