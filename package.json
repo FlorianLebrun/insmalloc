@@ -1,0 +1,7 @@
+{
+  "name": "satmalloc",
+  "version": "0.0.1",
+  "devDependencies": {
+      "script.cmake": "https://github.com/FlorianLebrun/script.cmake.git"
+  }
+}
