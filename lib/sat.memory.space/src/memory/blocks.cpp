@@ -163,7 +163,7 @@ tpSlabDescriptor SlabPnSnClass::allocate(MemoryContext* context) {
 
 void SlabPnSnClass::release(tpSlabDescriptor slab, MemoryContext* context) {
    auto batch = tpSlabBatchDescriptor(&slab[-slab->slab_position]);
-   uint64_t slab_bit = uint64_t(1) << (slab->slab_position-1);
+   uint64_t slab_bit = uint64_t(1) << (slab->slab_position - 1);
    _ASSERT(batch->uses & slab_bit);
    batch->uses ^= slab_bit;
    if (batch->uses == 0) {
@@ -288,7 +288,7 @@ BlockPageSpanClass::BlockPageSpanClass(uint8_t id, uint8_t packing, uint16_t len
 
 address_t BlockPageSpanClass::allocate(size_t target, MemoryContext* context) {
    _ASSERT(target <= this->getSizeMax());
-   address_t area = context->space->acquirePageSpan(this->packing, this->lengthL2);
+   address_t area = context->space->acquirePageSpan(this->packing, this->lengthL2 - cPageSizeL2);
 
    // Create a descriptor for this block
    auto slab = (tpSlabDescriptor)context->allocateSystemMemory(1);
@@ -301,7 +301,7 @@ address_t BlockPageSpanClass::allocate(size_t target, MemoryContext* context) {
 
    // Mark block pages in table
    auto* entries = &context->space->regions[area.regionID]->pages_table[area.pageID];
-   auto entries_count = size_t(this->packing) << this->lengthL2;
+   auto entries_count = size_t(this->packing) << (this->lengthL2 - cPageSizeL2);
    for (uint32_t i = 0; i < entries_count; i++) {
       auto& entry = entries[i];
       _ASSERT(entry.layoutID == 0 && entry.reference == 0);
@@ -349,7 +349,10 @@ BlockUnitSpanClass::BlockUnitSpanClass(uint8_t id)
 
 address_t BlockUnitSpanClass::allocate(size_t target, MemoryContext* context) {
    auto unit_count = alignX(target, sat::cUnitSize) >> sat::cUnitSizeL2;
+
+   // Allocate unit span
    auto unit = context->space->acquireUnitSpan(unit_count);
+   unit->commitMemorySpan();
    address_t area = unit->address();
 
    // Create a descriptor for this block

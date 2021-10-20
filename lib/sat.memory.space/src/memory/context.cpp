@@ -125,8 +125,9 @@ void MemoryContext::disposeBlock(address_t address) {
          cls->receivePartialSlab(slab, this);
       }
       else {
-         printf("free %d->%d\n", this->id, slab->context_id);
-         throw "todo";
+         //printf("cross-free %d->%d\n", this->id, slab->context_id);
+         slab->shared_freemap.fetch_xor(bit);
+         //throw "todo";
       }
    }
 }

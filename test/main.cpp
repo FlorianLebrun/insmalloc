@@ -40,6 +40,8 @@ void test_gc() {
 }
 
 int main() {
+   sat::PatchMemoryFunctions();
+
    sat_malloc_handler::init();
 
    test_gc();

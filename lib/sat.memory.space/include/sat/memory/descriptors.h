@@ -151,7 +151,7 @@ namespace sat {
       };
       uint8_t __reserve[7];
       std::atomic_uint64_t shared_freemap;
-      tpSlabDescriptor next; // Chaining slot to link slab in a slab queue
+      SlabDescriptor* next; // Chaining slot to link slab in a slab queue
 
    } *tpSlabDescriptor;
    static_assert(sizeof(SlabDescriptor) == 64, "bad size");

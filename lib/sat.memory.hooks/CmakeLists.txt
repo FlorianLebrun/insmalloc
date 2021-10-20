@@ -1,0 +1,9 @@
+set(target "sat.memory.hooks")
+
+append_group_sources(files FILTER "*.c|*.cpp|*.cc|*.h|*.hpp" ROOT "./src" DIRECTORIES "./" "./win32" "./win32/patcher")
+append_group_sources(files FILTER "*.c|*.cpp|*.cc|*.h|*.hpp" ROOT "./include/sat" DIRECTORIES "./")
+
+add_library(${target} STATIC ${files})
+
+target_include_directories(${target} PUBLIC "./include")
+

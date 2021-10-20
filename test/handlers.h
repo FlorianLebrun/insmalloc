@@ -4,6 +4,7 @@
 #include <sat/memory/space.h>
 #include <sat/memory/context.h>
 #include <sat/memory/gc.h>
+#include <sat/hooks.h>
 #include "./utils.h"
 
 struct no_malloc_handler {

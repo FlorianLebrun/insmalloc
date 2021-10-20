@@ -22,7 +22,7 @@ namespace sat {
             auto& layout = sat::cPageLayouts[entry.layoutID];
             auto block_ratio = (uintptr_t(address.position) + layout.offset) * layout.scale;
             this->descriptor = &tpSlabDescriptor(entry.reference)[block_ratio >> 32];
-            this->index = uint32_t(block_ratio) >> this->descriptor->block_ratio_shift;
+            this->index = (block_ratio & 0xFFFFFFFF) >> this->descriptor->block_ratio_shift;
          }
          else {
             this->descriptor = 0;

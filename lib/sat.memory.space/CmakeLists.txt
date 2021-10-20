@@ -1,4 +1,4 @@
-set(target "sat.memory")
+set(target "sat.memory.space")
 
 append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" ROOT "./src" DIRECTORIES "./" "./binary" "./memory" "./win32")
 append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" ROOT "./include/sat" DIRECTORIES "./" "./binary" "./memory")

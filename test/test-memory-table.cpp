@@ -165,7 +165,7 @@ void test_unit_fragment_alloc() {
 
    struct seg_t { address_t addr = nullptr; size_t size = 0; };
    std::vector<seg_t> segs(count);
-   auto& manifold = space->subunits_manifolds[0];
+   auto& manifold = space->pageSpans_manifolds[0];
    for (int k = 0; k < ncycle; k++) {
 
       for (int i = 0; i < count; i++) {
@@ -176,7 +176,7 @@ void test_unit_fragment_alloc() {
       c.Start();
       for (int i = 0; i < count; i++) {
          seg_t& s = segs[i];
-         s.addr = manifold.acquireSubunitSpan(space, s.size);
+         s.addr = manifold.acquirePageSpan(space, s.size);
          total_used += size_t(1) << s.size;
 #if _DEBUG
          space->check();
@@ -191,7 +191,7 @@ void test_unit_fragment_alloc() {
       c.Start();
       for (int i = 0; i < count; i++) {
          seg_t& s = segs[i];
-         manifold.releaseSubunitSpan(space, s.addr, s.size);
+         manifold.releasePageSpan(space, s.addr, s.size);
          s.addr = nullptr;
 #if _DEBUG
          space->check();
