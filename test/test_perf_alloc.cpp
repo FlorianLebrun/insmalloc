@@ -36,62 +36,62 @@ struct tTest {
       this->count = 140000;
    }
 
-   /*__declspec(noinline) void test_sat_malloc_2()
+   /*__declspec(noinline) void test_ins_malloc_2()
    {
       Chrono c;
       std::vector<void*> objects(count);
       int sizeDelta = sizeMax - sizeMin;
-      printf(">>> start: %lg s\n", sat::timing::getCurrentTime());
+      printf(">>> start: %lg s\n", ins::timing::getCurrentTime());
       c.Start();
       for (int i = 0; i < count; i++) {
          int size = sizeMin + (sizeDelta ? fastrand() % sizeDelta : 0);
-         sat::tObjectInfos infos;
-         auto obj = sat_malloc_ex(size, 4887);
+         ins::tObjectInfos infos;
+         auto obj = ins_malloc_ex(size, 4887);
          objects[i] = obj;
          //memset(objects[i], 0, size);
-         if (!sat_get_address_infos(obj, &infos))
+         if (!ins_get_address_infos(obj, &infos))
             printf("bad object\n");
          else if (infos.heapID != 0) printf("bad heapID\n");
          // printf(">> %d bytes at %.8X\n", int(size), uintptr_t(objects[i]));
       }
-      printf("[sat-malloc] alloc time = %g ns\n", c.GetDiffFloat(Chrono::NS) / float(count));
-      printf(">>> end: %lg s\n", sat::timing::getCurrentTime());
+      printf("[ins-malloc] alloc time = %g ns\n", c.GetDiffFloat(Chrono::NS) / float(count));
+      printf(">>> end: %lg s\n", ins::timing::getCurrentTime());
       c.Start();
 
-      sat::tObjectInfos infos;
+      ins::tObjectInfos infos;
       if (0) {
          for (int i = test_remain_count; i < count; i++) {
             int k = fastrand() % objects.size();
             void* obj = objects[k];
             objects[k] = objects.back();
             objects.pop_back();
-            sat_free(obj);
+            ins_free(obj);
          }
       }
       else if (1) {
          for (int i = test_remain_count; i < count; i++) {
             int k = objects.size() - 1;
             void* obj = objects[k];
-            if (!sat_get_address_infos(obj, &infos)) printf("bad object\n");
+            if (!ins_get_address_infos(obj, &infos)) printf("bad object\n");
             else if (infos.heapID != 0) printf("bad heapID\n");
             objects.pop_back();
-            sat_free(obj);
+            ins_free(obj);
          }
       }
       else {
          for (int i = test_remain_count; i < count; i++) {
             void* obj = objects[i];
-            sat_free(obj);
+            ins_free(obj);
          }
       }
-      printf("[sat-malloc] free time = %g ns\n", c.GetDiffFloat(Chrono::NS) / float(count));
-      sat_flush_cache();
-      sat_flush_cache();
-      sat_flush_cache();
-      sat_flush_cache();
-      sat_flush_cache();
-      sat::memory::checkObjectsOverflow();
-      //sat::memory::table.print();
+      printf("[ins-malloc] free time = %g ns\n", c.GetDiffFloat(Chrono::NS) / float(count));
+      ins_flush_cache();
+      ins_flush_cache();
+      ins_flush_cache();
+      ins_flush_cache();
+      ins_flush_cache();
+      ins::memory::checkObjectsOverflow();
+      //ins::memory::table.print();
       //system("pause");
       for (int i = 0; i < test_remain_count; i++) {
          printf(">> remain at %.12llX\n", int64_t(objects[i]));
@@ -175,8 +175,8 @@ struct tTest {
       GenericAllocTest<mi_malloc_handler>().Run(size_min, size_max);
       multi.Run(&GenericAllocTest<mi_malloc_handler>(), size_min, size_max);
 #elif TestID == 3
-      GenericAllocTest<sat_malloc_handler>().Run(size_min, size_max);
-      multi.Run(&GenericAllocTest<sat_malloc_handler>(), size_min, size_max);
+      GenericAllocTest<ins_malloc_handler>().Run(size_min, size_max);
+      multi.Run(&GenericAllocTest<ins_malloc_handler>(), size_min, size_max);
 #endif
    }
 
@@ -185,7 +185,7 @@ struct tTest {
       for (int i = 0; i < 3; i++) {
          //this->apply_fill_and_flush<no_malloc_handler>();
          //this->apply_fill_and_flush<default_malloc_handler>();
-         this->apply_fill_and_flush<sat_malloc_handler>();
+         this->apply_fill_and_flush<ins_malloc_handler>();
          //this->apply_fill_and_flush<mi_malloc_handler>();
          printf("                     * * *\n");
       }
@@ -196,7 +196,7 @@ struct tTest {
       for (int i = 0; i < 3; i++) {
          //this->apply_peak_drop<no_malloc_handler>(alloc_count, free_count);
          //this->apply_peak_drop<default_malloc_handler>(alloc_count, free_count);
-         this->apply_peak_drop<sat_malloc_handler>(alloc_count, free_count);
+         this->apply_peak_drop<ins_malloc_handler>(alloc_count, free_count);
          //this->apply_peak_drop<mi_malloc_handler>(alloc_count, free_count);
          printf("                     * * *\n");
       }
@@ -213,7 +213,7 @@ void test_perf_alloc() {
    //test.setBigSizeProfile();
    printf("------------------ Test perf alloc ------------------\n");
 
-   //test.test_sat_malloc_2();
+   //test.test_ins_malloc_2();
    //test.test_alloc_perf();
    test.test_peak_drop(10, 8);
    //test.test_fill_and_flush();

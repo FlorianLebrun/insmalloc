@@ -1,4 +1,0 @@
-
-namespace sat {
-   void PatchMemoryFunctions();
-}

@@ -4,12 +4,12 @@
 #include <atomic>
 #include <vector>
 
-using namespace sat;
+using namespace ins;
 
-extern"C" sat::BlockLocation s_block;
-sat::BlockLocation s_block;
+extern"C" ins::BlockLocation s_block;
+ins::BlockLocation s_block;
 
-typedef sat_malloc_handler TestAllocator;
+typedef ins_malloc_handler TestAllocator;
 //typedef mi_malloc_handler TestAllocator;
 //typedef default_malloc_handler TestAllocator;
 
@@ -59,10 +59,10 @@ void test_allocation_perf(MemoryContext& context, size_t size) {
 
 
 void test_objects_allocate() {
-   sat_malloc_handler::init();
-   MemoryContext& context = *sat_malloc_handler::context;
+   ins_malloc_handler::init();
+   MemoryContext& context = *ins_malloc_handler::context;
 
-   sat::printAllBlocks();
+   ins::printAllBlocks();
 
    if (1) {
       address_t ptr;

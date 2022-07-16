@@ -1,6 +1,6 @@
 #include "./handlers.h"
 
-using namespace sat;
+using namespace ins;
 
 extern void test_perf_alloc();
 extern void test_buddy_bitmap();
@@ -10,13 +10,13 @@ extern void test_page_access();
 
 extern void test_objects_allocate();
 
-sat::MemoryContext* sat_malloc_handler::context = 0;
+ins::MemoryContext* ins_malloc_handler::context = 0;
 
 
 class GCObject {
 public:
    void* operator new (size_t sz) {
-      return sat_malloc_handler::context->allocateBlock(sz);
+      return ins_malloc_handler::context->allocateBlock(sz);
    }
 };
 
@@ -29,7 +29,7 @@ public:
 };
 
 void test_gc() {
-   sat::GarbageCollector gc(sat_malloc_handler::context->space);
+   ins::GarbageCollector gc(ins_malloc_handler::context->space);
    Test1* obj = new Test1(10);
    gc.roots.push_back(obj);
    gc.scavenge();
@@ -40,9 +40,9 @@ void test_gc() {
 }
 
 int main() {
-   sat::PatchMemoryFunctions();
+   ins::PatchMemoryFunctions();
 
-   sat_malloc_handler::init();
+   ins_malloc_handler::init();
 
    test_gc();
    //test_buddy_bitmap();
@@ -52,11 +52,11 @@ int main() {
    //test_perf_alloc();
    //test_objects_allocate();
 
-   sat_malloc_handler::context->scavenge();
-   sat_malloc_handler::context->space->scavengeCaches();
+   ins_malloc_handler::context->scavenge();
+   ins_malloc_handler::context->space->scavengeCaches();
 
-   sat_malloc_handler::context->getStats();
-   sat_malloc_handler::context->space->getStats();
+   ins_malloc_handler::context->getStats();
+   ins_malloc_handler::context->space->getStats();
 
    return 0;
 }

@@ -1,0 +1,4 @@
+
+namespace ins {
+   void PatchMemoryFunctions();
+}

@@ -1,4 +1,4 @@
-#include <sat/memory/space.h>
+#include <ins/memory/space.h>
 #include "./utils.h"
 
 #include <vector>
@@ -6,7 +6,7 @@
 #include <atomic>
 #include <mimalloc.h>
 
-using namespace sat;
+using namespace ins;
 
 extern"C" uint64_t test_value;
 uint64_t test_value = 0;

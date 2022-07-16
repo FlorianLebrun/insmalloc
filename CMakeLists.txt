@@ -8,6 +8,6 @@ LANGUAGES ASM_MASM C CXX CSharp
 
 # Add own targets
 add_subdirectory(./thirdparty/mimalloc)
-add_subdirectory(./lib/sat.memory.space)
-add_subdirectory(./lib/sat.memory.hooks)
+add_subdirectory(./lib/ins.memory.space)
+add_subdirectory(./lib/ins.memory.hooks)
 add_subdirectory(./test)

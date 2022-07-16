@@ -1,10 +1,10 @@
 #pragma once
 #include <mimalloc.h>
-#include <sat/binary/alignment.h>
-#include <sat/memory/space.h>
-#include <sat/memory/context.h>
-#include <sat/memory/gc.h>
-#include <sat/hooks.h>
+#include <ins/binary/alignment.h>
+#include <ins/memory/space.h>
+#include <ins/memory/context.h>
+#include <ins/memory/gc.h>
+#include <ins/hooks.h>
 #include "./utils.h"
 
 struct no_malloc_handler {
@@ -53,15 +53,15 @@ struct mi_malloc_handler {
    }
 };
 
-struct sat_malloc_handler {
-   static sat::MemoryContext* context;
+struct ins_malloc_handler {
+   static ins::MemoryContext* context;
    static void init() {
       if (!context) {
-         context = new sat::MemoryContext(new sat::MemorySpace());
+         context = new ins::MemoryContext(new ins::MemorySpace());
       }
    }
    static const char* name() {
-      return "sat-malloc";
+      return "ins-malloc";
    }
    static void* malloc(size_t s) {
       return context->allocateBlock(s);
@@ -70,7 +70,7 @@ struct sat_malloc_handler {
       return context->disposeBlock(uintptr_t(p));
    }
    static bool check(void* p) {
-      sat::BlockLocation block(context->space, uintptr_t(p));
+      ins::BlockLocation block(context->space, uintptr_t(p));
       return block.descriptor || block.index;
    }
 };

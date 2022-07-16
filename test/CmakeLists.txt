@@ -1,10 +1,10 @@
-set(target "sat.memory-test")
+set(target "ins.memory-test")
 
 append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" DIRECTORIES "./")
 
 add_executable(${target} WIN32 ${files})
 
-target_link_libraries(${target} PRIVATE mimalloc-static sat.memory.space sat.memory.hooks)
+target_link_libraries(${target} PRIVATE mimalloc-static ins.memory.space ins.memory.hooks)
 target_link_options(${target} PRIVATE /SUBSYSTEM:CONSOLE)
 
 
