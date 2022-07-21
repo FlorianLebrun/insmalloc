@@ -1,0 +1,10 @@
+set(target "ins.memory-test2")
+
+append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" DIRECTORIES "./")
+
+add_executable(${target} WIN32 ${files})
+
+target_link_libraries(${target} PRIVATE mimalloc-static ins.memory.space2 ins.memory.hooks)
+target_link_options(${target} PRIVATE /SUBSYSTEM:CONSOLE)
+
+

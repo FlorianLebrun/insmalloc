@@ -2,6 +2,7 @@
   "name": "inslick.malloc",
   "version": "0.0.1",
   "devDependencies": {
-      "script.cmake": "https://github.com/FlorianLebrun/script.cmake.git"
+      "script.cmake": "https://github.com/FlorianLebrun/script.cmake.git",
+      "AVL-Tree": "https://github.com/FlorianLebrun/AVL-Tree.git#master"
   }
 }

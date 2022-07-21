@@ -8,6 +8,9 @@ LANGUAGES ASM_MASM C CXX CSharp
 
 # Add own targets
 add_subdirectory(./thirdparty/mimalloc)
-add_subdirectory(./lib/ins.memory.space)
+add_subdirectory(./node_modules/AVL-Tree/lib)
 add_subdirectory(./lib/ins.memory.hooks)
-add_subdirectory(./test)
+#add_subdirectory(./lib/ins.memory.space)
+add_subdirectory(./lib/ins.memory.space2)
+#add_subdirectory(./test)
+add_subdirectory(./test2)
