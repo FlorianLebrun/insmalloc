@@ -1,8 +1,8 @@
 #pragma once
+#include <stdint.h>
 
 namespace ins {
 #ifdef GCC_ASM
-#include <stdint.h>
 #define atomic_or(P, V) __sync_or_and_fetch((P), (V))
 #define atomic_and(P, V) __sync_and_and_fetch((P), (V))
 #define atomic_add(P, V) __sync_add_and_fetch((P), (V))

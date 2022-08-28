@@ -7,4 +7,4 @@ add_library(${target} STATIC ${files})
 
 target_include_directories(${target} PUBLIC "./include")
 
-target_link_libraries(${target} PRIVATE ins.avl)
+target_link_libraries(${target} PUBLIC ins.avl)

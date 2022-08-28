@@ -1,27 +1,46 @@
-#include "./descriptors.h"
-#include <stdint.h>
-#include <stdlib.h>
-#include <semaphore>
+#include <ins/memory/descriptors.h>
+#include <ins/memory/space.h>
 #include <vector>
-#include "../os/memory.h"
 
 using namespace ins;
 
+void ins::sDescriptor::Dispose() {
+   auto region = (sDescriptorAllocator*)space.GetRegionDescriptor(this);
+   region->Dispose(this);
+}
+
+void ins::sDescriptor::Resize(size_t newSize) {
+   auto region = (sDescriptorAllocator*)space.GetRegionDescriptor(this);
+   region->Extends(this, newSize);
+}
+
+sDescriptorAllocator* ins::sDescriptorAllocator::New(size_t countL2) {
+   size_t count = size_t(1) << countL2;
+   address_t buffer = space.ReserveArena();
+   OSMemory::CommitMemory(buffer, cst::PageSize);
+   auto region = new((void*)buffer) sDescriptorAllocator(countL2);
+   space.arenas[buffer.arenaID] = ArenaEntry(&region->arena);
+   space.SetRegionEntry(region, RegionEntry::cDescriptorBits);
+   return region;
+}
+
+ins::sArenaDescriptor::sArenaDescriptor(uint8_t sizing) {
+   this->sizing = sizing;
+   this->availables_count = cst::ArenaSize >> sizing;
+   memset(this->regions,RegionEntry::cFreeBits, this->availables_count);
+}
+
 void test_descriptor_region() {
 
-   uintptr_t region_sizeL2 = cst::RegionSizeL2 + 0;
-   uintptr_t region_buf = OSMemory::ReserveMemory(0, 0, size_t(1) << region_sizeL2, cst::RegionSize);
-   OSMemory::CommitMemory(region_buf, cst::PageSize);
-   sDescriptorRegion* region = new((void*)region_buf) sDescriptorRegion(region_sizeL2);
+   auto region = sDescriptorAllocator::New(0);
 
-   struct TestExtDesc : sExtensibleDescriptor {
-      sDescriptorRegion* region;
+   struct TestExtDesc : sDescriptor {
       size_t commited;
       size_t size;
 
-      TestExtDesc(size_t commited, size_t size, sDescriptorRegion* region) : size(size), commited(commited), region(region) {
+      TestExtDesc(size_t commited, size_t size) : size(size), commited(commited) {
          for (int i = sizeof(*this); i < commited; i++) ((char*)this)[i] = 0;
-         region->Extends(this, size);
+         this->Resize(size);
          for (int i = sizeof(*this); i < size; i++) ((char*)this)[i] = 0;
       }
       virtual size_t GetSize() {
@@ -34,8 +53,8 @@ void test_descriptor_region() {
          return this->commited;
       }
    };
-   auto desc = region->NewExtensible<TestExtDesc>(1000000, region);
-   region->Dispose(desc);
+   auto desc = region->NewExtensible<TestExtDesc>(1000000);
+   desc->Dispose();
 
    struct TestDesc : sDescriptor {
       virtual size_t GetSize() {
@@ -48,6 +67,6 @@ void test_descriptor_region() {
       descs.push_back(desc);
    }
    for (auto desc : descs) {
-      region->Dispose(desc);
+      desc->Dispose();
    }
 }

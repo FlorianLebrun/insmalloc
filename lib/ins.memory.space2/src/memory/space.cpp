@@ -1,93 +1,135 @@
-#include <stdint.h>
-#include <semaphore>
-#include <stdlib.h>
-#include "./objects.h"
-#include "../os/memory.h"
-
-struct MemoryContext;
-
-namespace ins {
-
-   struct sObjectClassContext {
-      ObjectRegion usedRegion = 0;
-      ObjectChain firstObject = 0;
-      ObjectChain middleObject = 0;
-      int numObjectNominal = 8;
-      int numObjectMax = 16;
-      int numObject = 0;
-
-      ObjectHeader Allocate(MemoryContext* context);
-      ObjectHeader AlllocateInBucket(MemoryContext* context);
-      ObjectHeader AllocateInPage(MemoryContext* context);
-      void Dispose(ObjectHeader* obj, MemoryContext* context);
-
-   };
-
-
-   const size_t c_ObjectClassMemoryCount = 1;
-
-   struct ObjectClassSpace {
-      ObjectRegion firstRegion;
-      ObjectRegion currentRegion;
-
-   };
-
-   struct MemorySpace {
-      ObjectClassSpace classes[c_ObjectClassMemoryCount];
-      void RunController();
-   };
-
-
-   struct MemoryContext {
-      MemorySpace* space;
-      sObjectClassContext classes[c_ObjectClassMemoryCount];
-
-      ObjectHeader AllocateObject(int id);
-      void DisposeObject(void* ptr);
-   };
-}
+#include <ins/memory/space.h>
 
 using namespace ins;
-/*
-ObjectHeader ins::sObjectClassContext::Allocate(MemoryContext* context) {
-   
-   // Try allocate from buckets
-   if (auto obj = this->firstObject) {
-      this->firstObject = obj->next;
-      this->numObject--;
-      if (obj == this->middleObject) {
-         this->middleObject = 0;
-      }
-      return obj;
+
+static sArenaDescriptor UnusedArena(cst::ArenaSizeL2);
+static sArenaDescriptor ForbiddenArena(cst::ArenaSizeL2);
+static std::mutex arenas_lock;
+ins::MemorySpace ins::space;
+
+ins::MemorySpace::MemorySpace() {
+   if (this != &ins::space) {
+      throw std::exception("singleton");
    }
-   
+   for (int i = 0; i < cst::ArenaPerSpace; i++) {
+      this->arenas[i] = ArenaEntry(&UnusedArena);
+   }
+   this->descriptorAllocator = sDescriptorAllocator::New(0);
+}
+
+void ins::MemorySpace::SetRegionEntry(address_t address, RegionEntry entry) {
+   auto arena = arenas[address.arenaID];
+   auto regionID = address.position >> arena.segmentation;
+   arena.descriptor()->regions[regionID] = entry;
+}
+
+RegionEntry ins::MemorySpace::GetRegionEntry(address_t address) {
+   auto arena = arenas[address.arenaID];
+   auto regionID = address.position >> arena.segmentation;
+   return arena.descriptor()->regions[regionID];
+}
+
+Descriptor ins::MemorySpace::GetRegionDescriptor(address_t address) {
+   auto arena = arenas[address.arenaID];
+   auto regionID = address.position >> arena.segmentation;
+   if (!arena.descriptor()->regions[regionID].IsFree()) {
+      address.position = regionID << arena.segmentation;
+      return Descriptor(address.ptr);
+   }
    return 0;
 }
 
-void sObjectClassContext::Dispose(ObjectHeader* obj, MemoryContext* context) {
-   if (this->numObject) {
+address_t ins::MemorySpace::ReserveArena() {
+   return OSMemory::ReserveMemory(0, cst::SpaceSize, cst::ArenaSize, cst::ArenaSize);
+}
 
+address_t ins::MemorySpace::AllocateRegion(uint32_t sizing) {
+   std::lock_guard<std::mutex> guard(this->lock);
+   auto& bucket = this->regions[sizing];
+
+   // Acquire a arena with availables regions
+   auto arena = bucket.availables;
+   if (!arena) {
+      address_t base = this->ReserveArena();
+      if (!base) throw std::exception("OOM");
+      arena = space.descriptorAllocator->NewBuffer<sArenaDescriptor>(sArenaDescriptor::GetSize(sizing), sizing);
+      arena->base = base;
+      arena->next = bucket.availables;
+      arenas[base.arenaID] = arena;
+      bucket.availables = arena;
    }
+
+   // Remove arena from availables list
+   if (0 == --arena->availables_count) {
+      bucket.availables = arena->next;
+      arena->next = 0;
+   }
+
+   // Find free region in arena 
+   auto size = size_t(1) << sizing;
+   for (int i = 0; i < (cst::ArenaSize >> sizing); i++) {
+      auto& tag = arena->regions[i];
+      if (tag.IsFree()) {
+         address_t ptr = arena->base + i * size;
+         OSMemory::CommitMemory(ptr, size);
+         tag = RegionEntry::cOpaqueBits;
+         return ptr;
+      }
+   }
+   throw std::exception("crash");
 }
 
-ObjectHeader MemoryContext::AllocateObject(int id) {
-   return this->classes[id].Allocate(this);
+void ins::MemorySpace::DisposeRegion(address_t base, uint32_t sizing) {
+   throw std::exception("TODO");
 }
 
-void MemoryContext::DisposeObject(void* ptr) {
-   throw;
+ObjectHeader ins::MemorySpace::GetObject(address_t address) {
+   auto arena = arenas[address.arenaID];
+   auto regionID = address.position >> arena.segmentation;
+   auto regionTag = arena.descriptor()->regions[regionID];
+   if (!regionTag.hasNoObjects) {
+      auto regionMask = (size_t(1) << arena.segmentation) - 1;
+      auto region = (sObjectRegion*)(uintptr_t(address.ptr) & regionMask);
+      return 0;
+   }
+   return 0;
 }
-*/
 
+void ins::MemorySpace::ScheduleHeapMaintenance(ins::ObjectClassHeap* heap) {
+}
 
-struct DescriptorsRegion {
-};
+void ins::MemorySpace::RunController() {
+   std::thread(
+      []() {
 
-namespace cst {
-   const size_t RegionSizeL2 = 20;
-   const size_t RegionSize = size_t(1) << RegionSizeL2;
-};
+      }
+   );
+}
 
-void MemorySpace::RunController() {
-
+void ins::MemorySpace::Print() {
+   for (address_t addr; addr.arenaID < cst::ArenaPerSpace; addr.arenaID++) {
+      auto arena = arenas[addr.arenaID].descriptor();
+      auto region_count = arena->GetRegionCount();
+      auto region_size = size_t(1) << arena->sizing;
+      addr.position = 0;
+      for (size_t regionID = 0; regionID < region_count; regionID++) {
+         auto& tag = arena->regions[regionID];
+         if (!tag.IsFree()) {
+            printf("\n[%d,%d] %lld bytes", addr.arenaID, regionID, region_size);
+            if (!tag.hasNoObjects) {
+               auto region = ObjectRegion(addr.ptr);
+               printf(": layout(%d)", region->layout);
+            }
+            else if (tag.hasDescriptor) {
+               auto region = Descriptor(addr.ptr);
+               printf(": classname(%s)", typeid(region).name());
+            }
+            else {
+               printf(": opaque");
+            }
+         }
+         addr.position += region_size;
+      }
+   }
+   printf("\n");
 }

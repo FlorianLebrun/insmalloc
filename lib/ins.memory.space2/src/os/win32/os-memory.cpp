@@ -1,5 +1,5 @@
 #include <ins/binary/alignment.h>
-#include "../memory.h"
+#include <ins/memory/os-memory.h>
 
 #include <windows.h>
 #include <psapi.h>
