@@ -214,7 +214,7 @@ tpSlabDescriptor MemorySpace::SlabBin::pop(MemorySpace* space, uint8_t context_i
 
       // Find index and tag it
       uint64_t availables = batch->usables ^ batch->uses;
-      SAT_ASSERT(availables != 0);
+      INS_ASSERT(availables != 0);
       size_t index = lsb_64(availables);
       batch->uses |= uint64_t(1) << index;
       size_t position = index + 1;

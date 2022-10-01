@@ -118,7 +118,10 @@ void ins::MemorySpace::Print() {
             printf("\n[%d,%d] %lld bytes", addr.arenaID, regionID, region_size);
             if (!tag.hasNoObjects) {
                auto region = ObjectRegion(addr.ptr);
-               printf(": layout(%d)", region->layout);
+               auto nobj = region->objects_bin.length() + region->shared_bin.length();
+               auto nobj_max = region->infos.object_count;
+               printf(": layout(%d) objects(%d/%d)", region->layout, nobj, nobj_max);
+               if (region->IsEmpty()) printf(" [empty]");
             }
             else if (tag.hasDescriptor) {
                auto region = Descriptor(addr.ptr);

@@ -3,6 +3,8 @@
 #include <exception>
 #include <ins/binary/bitwise.h>
 
+#define _INS_PROTECTION 1
+
 namespace ins {
 
    typedef size_t index_t;
@@ -132,3 +134,8 @@ namespace ins {
    };
 }
 
+#if _INS_PROTECTION
+#define _INS_PROTECT_CONDITION(x) _ASSERT(x)
+#else
+#define _INS_PROTECT_CONDITION(x)
+#endif

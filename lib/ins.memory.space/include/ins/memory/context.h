@@ -15,7 +15,7 @@ namespace ins {
       BlockLocation(MemorySpace* space, address_t address) {
          this->set(space, address);
       }
-      SAT_PROFILE void set(MemorySpace* space, address_t address) {
+      INS_PROFILE void set(MemorySpace* space, address_t address) {
          auto region = address.regionID < cRegionPerSpace ? space->regions[address.regionID] : 0;
          if (region) {
             auto& entry = space->regions[address.regionID]->pages_table[address.pageID];
@@ -39,7 +39,7 @@ namespace ins {
       struct BlockBin {
          tpSlabDescriptor slabs = 0;
          sizeid_t element_size;
-         SAT_PROFILE address_t pop();
+         INS_PROFILE address_t pop();
          void scavenge(MemoryContext* context);
          void getStats(ElementClassStats& stats);
       };

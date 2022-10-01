@@ -5,20 +5,20 @@
 #include <ins/memory/context.h>
 
 #if _DEBUG
-#define USE_SAT_DEBUG 1
+#define USE_INS_DEBUG 1
 #else
-#define USE_SAT_DEBUG 0
+#define USE_INS_DEBUG 0
 #endif
 
-#if USE_SAT_DEBUG
-#define SAT_DEBUG(x) x
-#define SAT_ASSERT(x) _ASSERT(x)
-#define SAT_INLINE _ASSERT(x)
-#define SAT_PROFILE __declspec(noinline)
+#if USE_INS_DEBUG
+#define INS_DEBUG(x) x
+#define INS_ASSERT(x) _ASSERT(x)
+#define INS_INLINE _ASSERT(x)
+#define INS_PROFILE __declspec(noinline)
 #else
-#define SAT_DEBUG(x)
-#define SAT_ASSERT(x)
-#define SAT_PROFILE
+#define INS_DEBUG(x)
+#define INS_ASSERT(x)
+#define INS_PROFILE
 #endif
 
 namespace ins {

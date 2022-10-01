@@ -7,10 +7,10 @@
 
 using namespace ins;
 
-SAT_DEBUG(static MemorySpace* g_space = 0);
+INS_DEBUG(static MemorySpace* g_space = 0);
 
 MemoryContext::MemoryContext(MemorySpace* space) {
-   SAT_DEBUG(g_space = space);
+   INS_DEBUG(g_space = space);
    space->registerContext(this);
    for (int i = 0; i < cBlockBinCount; i++) {
       BlockClass* cls = cBlockBinTable[i];
@@ -64,7 +64,7 @@ address_t MemoryContext::BlockBin::pop() {
       }
 
       // Find index and tag it
-      SAT_ASSERT(availables != 0);
+      INS_ASSERT(availables != 0);
       auto index = lsb_64(availables);
       slab->uses |= uint64_t(1) << index;
 
@@ -74,9 +74,9 @@ address_t MemoryContext::BlockBin::pop() {
       uintptr_t ptr = (block_index * this->element_size.packing) << this->element_size.shift;
       ptr += uintptr_t(slab->page_index) << ins::cPageSizeL2;
 
-      SAT_DEBUG(BlockLocation loc(g_space, ptr));
-      SAT_ASSERT(loc.descriptor == slab);
-      SAT_ASSERT(loc.index == index);
+      INS_DEBUG(BlockLocation loc(g_space, ptr));
+      INS_ASSERT(loc.descriptor == slab);
+      INS_ASSERT(loc.index == index);
       return ptr;
    }
    return nullptr;
@@ -93,10 +93,10 @@ void MemoryContext::releaseSystemMemory(void* base, size_t length64) {
 address_t MemoryContext::allocateBlock(size_t size) {
    size_target_t target(size);
    auto cls = ins::getBlockClass(target);
-   SAT_ASSERT(size <= cls->getSizeMax());
+   INS_ASSERT(size <= cls->getSizeMax());
    //printf("allocate %d for %d (lost = %lg%%)\n", cls->getSizeMax(), size, trunc(100*double(cls->getSizeMax() - size) / double(cls->getSizeMax())));
    auto addr = cls->allocate(size, this);
-   SAT_DEBUG(memset(addr, 0xdd, size));
+   INS_DEBUG(memset(addr, 0xdd, size));
    return addr;
 }
 
@@ -106,7 +106,7 @@ void MemoryContext::disposeBlock(address_t address) {
    auto slab = block.descriptor;
 
    uint64_t bit = uint64_t(1) << block.index;
-   SAT_ASSERT(slab->uses & bit);
+   INS_ASSERT(slab->uses & bit);
 
    if (slab->context_id == this->id) {
       slab->uses ^= bit;

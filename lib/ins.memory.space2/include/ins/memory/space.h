@@ -3,6 +3,7 @@
 #include <ins/binary/alignment.h>
 #include <ins/binary/bitwise.h>
 #include <ins/memory/objects.h>
+#include <ins/memory/objects-region.h>
 
 namespace ins {
 
