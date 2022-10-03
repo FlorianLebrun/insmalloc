@@ -58,7 +58,7 @@ namespace ins {
                this->count = 0;
             }
          }
-         void CheckCount() {
+         void CheckValidity() {
             int c = 0;
             auto base = uintptr_t(this) & ~uintptr_t(0x3ff);
             for (auto x = first; x; x = ObjectChain(x + base)->next) c++;
@@ -178,7 +178,7 @@ namespace ins {
             // Prepare new object
             auto offset = this->infos.object_base + (slabIndex * cst::ObjectPerSlab + index) * this->infos.object_size;
             auto obj = ObjectHeader(&ObjectBytes(this)[offset]);
-            obj->bits = sObjectHeader::cNewHeaderBits;
+            obj->bits = sObjectHeader::cDisposedHeaderBits;
 
             // Publish object as ready
             auto bit = uint32_t(1) << index;
@@ -195,7 +195,7 @@ namespace ins {
       ObjectHeader AcquireObject() {
          if (auto obj = objects_bin.PopObject(this)) {
             _ASSERT(obj->used == 0);
-            obj->bits = sObjectHeader::cNewHeaderBits;
+            obj->bits = sObjectHeader::cDisposedHeaderBits;
             return obj;
          }
          return this->AcquireSlabObject();
@@ -356,18 +356,18 @@ namespace ins {
          return 0;
       }
       int AcquireObjectBatch(ObjectBucket& bucket) {
-         int expected_count = bucket.list_length;
+         int expected_count = bucket.batch_length;
          int count = 0;
          do {
 
             // Try acquire in available region
             while (auto region = this->usables) {
-               while (count < expected_count) {
-                  if (auto obj = region->AcquireObject()) {
-                     bucket.PushObject(obj);
-                     count++;
+               while (auto obj = region->AcquireObject()) {
+                  bucket.PushObject(obj);
+                  count++;
+                  if (count >= expected_count) {
+                     return count;
                   }
-                  else break;
                }
                this->usables = region->next.usables;
                region->next.usables = sObjectRegion::none();

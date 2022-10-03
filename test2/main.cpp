@@ -134,8 +134,8 @@ int main() {
 
 
    //generate_layout_config("C:/git/project/insmalloc/lib/ins.memory.space2");
-   test_private_object();
-   //test_shared_object();
+   //test_private_object();
+   test_shared_object();
    //test_descriptor_region();
 
    return 0;

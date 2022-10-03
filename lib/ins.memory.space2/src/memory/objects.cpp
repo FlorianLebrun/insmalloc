@@ -15,61 +15,91 @@ sObjectRegion* sObjectRegion::New(uint8_t layout) {
 
 ObjectHeader ObjectBucket::PopObject() {
    if (auto obj = this->items) {
-      if (obj->nextObject) {
-         this->items = obj->nextObject;
-      }
-      else {
-         this->items = ObjectChain(obj->nextList);
-         this->list_count--;
-      }
+      this->items = obj->nextObject;
       this->count--;
-      obj->used = 1;
       return obj;
+   }
+   else if (auto batch = this->batches) {
+      this->items = batch;
+      this->batches = ObjectChain(batch->nextBatch);
+      batch->nextBatch = 0;
+      this->batch_count--;
+      return this->PopObject();
    }
    return 0;
 }
 
 void ObjectBucket::PushObject(ObjectHeader obj) {
-   ObjectChain freelist = 0;
    auto cobj = ObjectChain(obj);
-   obj->used = 0;
-   if (this->items && this->items->length < this->list_length) {
-      cobj->nextObject = this->items;
-      cobj->nextList = 0;
-      cobj->length = this->items->length + 1;
+   _ASSERT(obj->used == 0);
+
+   // Flush items to a new batch
+   auto prev_items = this->items;
+   if (prev_items && prev_items->length >= this->batch_length) {
+      prev_items->nextBatch = uint64_t(this->batches);
+      this->batches = prev_items;
+      this->batch_count++;
+      prev_items = 0;
+   }
+
+   // Add object to items
+   if (!prev_items) {
+      cobj->nextObject = 0;
+      cobj->length = 1;
+      this->items = cobj;
+      this->count++;
    }
    else {
-      cobj->nextObject = 0;
-      cobj->nextList = uint64_t(this->items);
-      cobj->length = 0;
-      this->list_count++;
+      cobj->nextObject = prev_items;
+      cobj->length = prev_items->length + 1;
+      this->items = cobj;
+      this->count++;
    }
-   this->items = cobj;
-   this->count++;
-   //printf("%p: %d/%d\n", this, this->count, this->list_count);
 }
 
 bool ObjectBucket::TransfertBatch(ObjectBucket& receiver) {
-   if (ObjectChain batch = this->items) {
+   if (ObjectChain batch = this->batches) {
 
       // Pull one batch from this provider
-      this->items = ObjectChain(batch->nextList);
+      this->batches = ObjectChain(batch->nextBatch);
       this->count -= batch->length;
-      this->list_count--;
+      this->batch_count--;
 
       // Push one batch to receiver
-      if (receiver.items) {
-         batch->nextList = receiver.items->nextList;
-         receiver.items->nextList = uint64_t(batch);
+      if (receiver.batches) {
+         batch->nextBatch = receiver.batches->nextBatch;
+         receiver.batches->nextBatch = uint64_t(batch);
       }
       else {
-         batch->nextList = 0;
-         receiver.items = batch;
+         batch->nextBatch = 0;
+         receiver.batches = batch;
       }
       receiver.count += batch->length;
-      receiver.list_count++;
+      receiver.batch_count++;
 
       return true;
    }
    return false;
+}
+
+void ObjectBucket::CheckValidity() {
+   int obj_count_1 = 0;
+   int obj_count_2 = 0;
+   int batch_count = 0;
+   if (this->items) {
+      for (auto obj = this->items; obj; obj = obj->nextObject) {
+         obj_count_1++;
+      }
+      obj_count_2 += this->items->length;
+   }
+   for (auto batch = this->batches; batch; batch = ObjectChain(batch->nextBatch)) {
+      for (auto obj = batch; obj; obj = obj->nextObject) {
+         obj_count_1++;
+      }
+      obj_count_2 += batch->length;
+      batch_count++;
+   }
+   _ASSERT(obj_count_1 == this->count);
+   _ASSERT(obj_count_2 == this->count);
+   _ASSERT(batch_count == this->batch_count);
 }

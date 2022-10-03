@@ -35,7 +35,12 @@ namespace ins {
       bool AcquireObjectBatch(ObjectBucket& bucket) {
          std::lock_guard<std::mutex> guard(lock);
 
-         // Try alloc in regions bucket
+         // Try alloc in objects bucket
+         if (this->shared_objects_cache.TransfertBatch(bucket)) {
+            return true;
+         }
+
+         // Try alloc in regions pool
          if (this->regions_pool.AcquireObjectBatch(bucket)) {
             return true;
          }
@@ -73,8 +78,9 @@ namespace ins {
 
       ObjectHeader AllocatePrivateObject() {
 
-         // Try alloc in context bucket
+         // Try alloc in regions pool
          if (auto obj = this->regions_pool.AcquireObject()) {
+            obj->used = 1;
             return obj;
          }
 
@@ -82,23 +88,25 @@ namespace ins {
          if (auto region = sObjectRegion::New(layout)) {
             region->owner = this;
             this->regions_pool.PushUsableRegion(region);
-            return this->regions_pool.AcquireObject();
+            if (auto obj = this->regions_pool.AcquireObject()) {
+               obj->used = 1;
+               return obj;
+            }
          }
 
          return 0;
       }
 
       ObjectHeader AllocateSharedObject() {
+         do {
+            // Try alloc in context objects bucket
+            if (auto obj = this->shared_objects_cache.PopObject()) {
+               obj->used = 1;
+               return obj;
+            }
 
-         // Try alloc in context bucket
-         if (auto obj = this->shared_objects_cache.PopObject()) {
-            return obj;
-         }
-
-         // Acquire and alloc in a new region
-         if (this->heap->AcquireObjectBatch(this->shared_objects_cache)) {
-            return this->shared_objects_cache.PopObject();
-         }
+            // Fill a object cache from heap and retry
+         } while (this->heap->AcquireObjectBatch(this->shared_objects_cache));
 
          return 0;
       }
@@ -115,7 +123,7 @@ namespace ins {
          }
          else if (region->owner == this->heap) {
             this->shared_objects_cache.PushObject(obj);
-            if (this->shared_objects_cache.list_count > 2) {
+            if (this->shared_objects_cache.batch_count > 2) {
                this->heap->TransfertBatch(this->shared_objects_cache);
             }
          }

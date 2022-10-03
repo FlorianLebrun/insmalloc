@@ -99,23 +99,27 @@ namespace ins {
    *
    ***********************************************************************/
    struct ObjectBucket {
-
+   private:
       typedef struct sObjectChain : sObjectHeader {
          sObjectChain* nextObject;
-         uint64_t nextList : 48;
+         uint64_t nextBatch : 48;
          uint64_t length : 16;
       } *ObjectChain;
       static_assert(sizeof(sObjectChain) == sizeof(uint64_t) * 3, "bad size");
 
       ObjectChain items = 0;
+      ObjectChain batches = 0;
       uint32_t count = 0;
-      uint16_t list_count = 0;
-      uint16_t list_length = 32;
+   public:
+      uint16_t batch_count = 0;
+      uint16_t batch_length = 32;
 
       void PushObject(ObjectHeader obj);
       ObjectHeader PopObject();
 
       bool TransfertBatch(ObjectBucket& receiver);
+
+      void CheckValidity();
    };
 
    /**********************************************************************
