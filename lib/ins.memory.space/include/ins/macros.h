@@ -1,18 +1,26 @@
 #pragma once
 
+#define _INS_PROTECTION 1
+
 #if _DEBUG
-#define USE_INS_DEBUG 1
+#define _USE_INS_DEBUG 1
 #else
-#define USE_INS_DEBUG 0
+#define _USE_INS_DEBUG 0
 #endif
 
-#if USE_INS_DEBUG
-#define INS_DEBUG(x) x
-#define INS_ASSERT(x) _ASSERT(x)
-#define INS_INLINE _ASSERT(x)
-#define INS_PROFILE __declspec(noinline)
+#if _USE_INS_DEBUG
+#define _INS_DEBUG(x) x
+#define _INS_ASSERT(x) _ASSERT(x)
+#define _INS_INLINE _ASSERT(x)
+#define _INS_PROFILE __declspec(noinline)
 #else
-#define INS_DEBUG(x)
-#define INS_ASSERT(x)
-#define INS_PROFILE
+#define _INS_DEBUG(x)
+#define _INS_ASSERT(x)
+#define _INS_PROFILE
+#endif
+
+#if _INS_PROTECTION
+#define _INS_PROTECT_CONDITION(x) _ASSERT(x)
+#else
+#define _INS_PROTECT_CONDITION(x)
 #endif

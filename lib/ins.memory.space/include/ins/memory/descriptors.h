@@ -1,194 +1,400 @@
 #pragma once
-#include <atomic>
+#include <stdint.h>
+#include <stdlib.h>
+#include <mutex>
+#include <ins/binary/alignment.h>
 #include <ins/binary/bitwise.h>
+#include <ins/memory/structs.h>
+#include <ins/memory/os-memory.h>
+#include <ins/avl/AVLOperators.h>
 
 namespace ins {
+   struct sArenaDescriptor;
+   typedef struct sDescriptor* Descriptor;
+   typedef struct sRegionDescriptor* RegionDescriptor;
+   typedef sArenaDescriptor* ArenaDescriptor;
 
-   struct MemoryContext;
-
-   //-------------------------------------------------------
-   // Memory space constants
-   //-------------------------------------------------------
-   const size_t cPageSizeL2 = 16;
-   const size_t cPageSize = size_t(1) << cPageSizeL2;
-   const uintptr_t cPageMask = cPageSize - 1;
-
-   const size_t cUnitSizeL2 = 22;
-   const size_t cUnitSize = size_t(1) << cUnitSizeL2;
-   const uintptr_t cUnitMask = cUnitSize - 1;
-
-   const size_t cRegionSizeL2 = 32;
-   const size_t cRegionSize = size_t(1) << cRegionSizeL2;
-   const uintptr_t cRegionMask = cRegionSize - 1;
-
-   const size_t cRegionPerSpaceL2 = 8;
-   const size_t cRegionPerSpace = size_t(1) << cRegionPerSpaceL2;
-   const size_t cUnitPerRegionL2 = 10;
-   const size_t cUnitPerRegion = size_t(1) << cUnitPerRegionL2;
-   const size_t cPagePerUnitL2 = 6;
-   const size_t cPagePerUnit = size_t(1) << cPagePerUnitL2;
-   const size_t cPagePerRegionL2 = cRegionSizeL2 - cPageSizeL2;
-   const size_t cPagePerRegion = size_t(1) << cPagePerRegionL2;
-
-   //-------------------------------------------------------
-   // Memory address representation
-   //-------------------------------------------------------
-#pragma pack(push,1)
-   union address_t {
-      uintptr_t ptr;
-      struct {
-         uint16_t position;
-         uint16_t pageID;
-         uint32_t regionID;
-      };
-      struct {
-         uint16_t position;
-         uint32_t pageIndex;
-      };
-      struct Unit {
-         uint16_t position;
-         uint16_t pageID : 6;
-         uint16_t unitID : 10;
-         uint32_t regionID;
-      } unit;
-      address_t() : ptr(0) {}
-      address_t(uintptr_t ptr) : ptr(ptr) {}
-      address_t(void* ptr) : ptr(uintptr_t(ptr)) {}
-      operator uintptr_t() { return ptr; }
-      operator void* () { return (void*)ptr; }
+   enum class DescriptorType {
+      Free,
+      System,
+      Region,
+      Arena,
    };
-   static_assert(sizeof(address_t) == 8, "bad size");
-#pragma pack(pop)
 
-   //-------------------------------------------------------
-   // Memory size representation
-   //-------------------------------------------------------
-   const size_t cPackingCount = 4;
+   struct sDescriptor {
+      virtual size_t GetSize() = 0;
+      virtual DescriptorType GetType() { return DescriptorType::System; }
+      virtual void SetUsedSize(size_t commited) { throw "not extensible"; }
+      virtual size_t GetUsedSize() { return this->GetSize(); }
+      virtual void Resize(size_t newSize);
+      virtual void Dispose();
+   protected:
+      ~sDescriptor();
+   };
 
-   // Compact size def
-   struct sizeid_t {
-      uint8_t packing : 3; // in { 1, 3, 5, 7 }
-      uint8_t shift : 5;
-      sizeid_t(uint8_t packing = 0, uint8_t shift = 0)
-         : packing(packing), shift(shift) {
-      }
-      size_t size() {
-         return size_t(packing) << shift;
+   struct sRegion : sDescriptor {
+      virtual DescriptorType GetType() {
+         return DescriptorType::Region;
       }
    };
 
-   // Normal size def
-   struct size_target_t {
-      uint16_t packing;
-      uint16_t shift;
-      size_target_t(size_t size) {
-         size_t exp, base;
-         if (size > 8) {
-            exp = size_t(msb_32(size)) - 2;
-            base = size >> exp;
+   union RegionEntry {
+      static const uint8_t cFreeBits = 0x00;
+      static const uint8_t cOpaqueBits = 0x80;
+      static const uint8_t cDescriptorBits = 0x80|0x40;
+      uint8_t bits;
+      struct {
+         uint8_t __resv : 6;
+         uint8_t hasDescriptor : 1; // when hasDescriptor = 1: region is 'sRegion'
+         uint8_t hasNoObjects : 1; // when hasNoObjects = 1: region is not 'sObjectRegion'
+      };
+      struct {
+         // When: sObjectRegionDescriptor
+         uint8_t objectLayoutID : 7; // object sizing of the region
+         uint8_t hasNoObjects : 1; // when hasNoObjects = 0: region is 'sObjectRegion'
+      };
+      RegionEntry(uint8_t bits = 0)
+         : bits(bits) {
+      }
+      bool IsFree() {
+         return this->bits == cFreeBits;
+      }
+      bool IsObjectRegion() {
+         return !this->hasNoObjects;
+      }
+      static RegionEntry ObjectRegion(uint8_t objectLayoutID) {
+         _ASSERT(objectLayoutID < 128);
+         return RegionEntry(objectLayoutID);
+      }
+   };
+   static_assert(sizeof(RegionEntry) == 1, "bad size");
+
+   struct sArenaDescriptor : sDescriptor {
+      address_t base;
+      uint8_t sizing;
+      std::atomic_uint32_t availables_count = 0;
+      sArenaDescriptor* next = 0;
+      RegionEntry regions[1];
+      sArenaDescriptor(uint8_t sizing);
+      size_t GetSize() override {
+         return GetSize(this->sizing);
+      }
+      DescriptorType GetType() override {
+         return DescriptorType::Arena;
+      }
+      size_t GetRegionCount() {
+         return size_t(1) << (cst::ArenaSizeL2 - this->sizing);
+      }
+      static size_t GetSize(uint8_t sizing) {
+         return sizeof(sArenaDescriptor) + (cst::ArenaSize >> sizing) * sizeof(RegionEntry);
+      }
+   };
+
+   union ArenaEntry {
+      uint64_t bits;
+      struct {
+         uint64_t segmentation : 8;
+         uint64_t reference : 56;
+      };
+      ArenaEntry()
+         : bits(0) {
+      }
+      ArenaEntry(ArenaDescriptor descriptor)
+         : reference(uint64_t(descriptor)), segmentation(descriptor->sizing) {
+      }
+      ArenaDescriptor descriptor() {
+         return ArenaDescriptor(this->reference);
+      }
+      operator bool() {
+         return this->bits != 0;
+      }
+   };
+   static_assert(sizeof(ArenaEntry) == 8, "bad size");
+
+   // Descriptor heap (based on buddy allocator)
+   struct sDescriptorHeap : sRegion {
+
+      struct sDescriptorArena : sArenaDescriptor {
+         sDescriptorArena() : sArenaDescriptor(cst::ArenaSizeL2) {
+            this->availables_count--;
+            _ASSERT(this->availables_count == 0);
+         }
+      };
+
+      typedef struct sBlockDescriptor : sDescriptor {
+         sBlockDescriptor** bucketAnchor = 0, * bucketNext = 0;
+         uint32_t sizeL2 = 0;
+         sBlockDescriptor(uint32_t sizeL2) : sizeL2(sizeL2) {}
+         DescriptorType GetType() override { return DescriptorType::Free; }
+         size_t GetSize() override { return size_t(1) << sizeL2; }
+      } *BlockDescriptor;
+      static_assert(sizeof(sBlockDescriptor) <= 64, "bad size");
+
+      typedef struct sPageSpanDescriptor : sDescriptor {
+         sPageSpanDescriptor** bucketAnchor = 0, * bucketNext = 0;
+         sPageSpanDescriptor* paging_L, * paging_R;
+         uint8_t paging_H;
+         struct AVLHandler {
+            typedef sPageSpanDescriptor* Node;
+            typedef AVLOperators<sPageSpanDescriptor, AVLHandler, intptr_t> Operators;
+            static Node& left(Node node) { return node->paging_L; }
+            static Node& right(Node node) { return node->paging_R; }
+            static uint8_t& height(Node node) { return node->paging_H; }
+            struct Insert : Operators::IInsertable {
+               Node node; Insert(Node node) : node(node) {}
+               virtual intptr_t compare(Node node) override {
+                  if (auto c = intptr_t(this->node->ptr) - intptr_t(node->ptr)) return c;
+                  return 0;
+               }
+               virtual Node create(Node overridden) override {
+                  if (overridden) throw; return this->node;
+               }
+            };
+            struct Key : Operators::IComparable {
+               uintptr_t ptr; Key(uintptr_t ptr) : ptr(ptr) {}
+               virtual intptr_t compare(Node node) override {
+                  if (auto c = intptr_t(this->ptr) - intptr_t(node->ptr)) return c;
+                  return 0;
+               }
+            };
+         };
+         uint16_t lengthL2;
+         uintptr_t ptr;
+         sPageSpanDescriptor(uintptr_t ptr, uint32_t lengthL2) : ptr(ptr), lengthL2(lengthL2) { }
+         size_t GetSize() override { return sizeof(sPageSpanDescriptor); }
+      } *PageSpanDescriptor;
+      static_assert(sizeof(sPageSpanDescriptor) <= 64, "bad size");
+
+      struct BlockDescriptorBucket {
+         static const size_t cBlockSizeL2_Min = 6;
+         static const size_t cBlockSizeL2_Max = cst::PageSizeL2;
+
+         uint32_t sizesMap = 0; // bit: 1 -> contains block, 0 -> empty
+         BlockDescriptor blocks[cst::PageSizeL2 + 1];
+
+         void PushBlock(BlockDescriptor block) {
+            auto& anchor = blocks[block->sizeL2];
+            block->bucketAnchor = &anchor;
+            block->bucketNext = anchor;
+            anchor = block;
+            sizesMap |= uint32_t(1) << block->sizeL2;
+         }
+         BlockDescriptor PullBlock(size_t minSizeL2) {
+            auto fsizeL2 = GetAvailableSizeL2(minSizeL2, sizesMap);
+            if (fsizeL2 > 0) {
+               auto block = blocks[fsizeL2];
+               block->bucketAnchor[0] = block->bucketNext;
+               if (!blocks[fsizeL2]) {
+                  sizesMap ^= uint32_t(1) << fsizeL2;
+               }
+               return block;
+            }
+            return 0;
+         }
+         BlockDescriptor MakeBlock(size_t sizeL2) {
+            if (auto block = PullBlock(sizeL2)) {
+               SliceBlockBuffer(block, block->sizeL2, sizeL2);
+               return block;
+            }
+            return 0;
+         }
+         void SliceBlockBuffer(ptr_t buffer, size_t fromSizeL2, size_t toSizeL2) {
+            while (fromSizeL2 > toSizeL2) {
+               auto buddyBit = uintptr_t(1) << (--fromSizeL2);
+               auto buddy = new(ptr_t(uintptr_t(buffer) ^ buddyBit)) sBlockDescriptor(fromSizeL2);
+               PushBlock(buddy);
+            }
+         }
+         void MergeBlocks() {
+            // Bubble merging algorithm, iterate from small to big size
+            for (auto sizeL2 = cBlockSizeL2_Min; sizeL2 < cBlockSizeL2_Max; sizeL2++) {
+
+               // Merge blocks
+               auto block = blocks[sizeL2];
+               auto buddyBit = uintptr_t(1) << sizeL2;
+               while (block) {
+                  auto buddy = BlockDescriptor(uintptr_t(block) ^ buddyBit);
+                  if (buddy->GetType() == DescriptorType::Free && buddy->sizeL2 == sizeL2) {
+                     // Unlink buddies
+                     buddy->bucketAnchor[0] = buddy->bucketNext;
+                     block->bucketAnchor[0] = block->bucketNext;
+                     auto nextBlock = block->bucketNext;
+
+                     // Push upper block
+                     if (uintptr_t(block) & buddyBit) block = buddy;
+                     block->sizeL2++;
+                     PushBlock(block);
+
+                     block = nextBlock;
+                  }
+                  else {
+                     block = block->bucketNext;
+                  }
+               }
+
+               // Update sizes map
+               if (!blocks[sizeL2]) {
+                  sizesMap &= ~(uint32_t(1) << sizeL2);
+               }
+            }
+         }
+      };
+
+      struct PageSpanDescriptorBucket {
+         typedef sPageSpanDescriptor::AVLHandler AVL;
+         uint32_t lengthsMap = 0; // bit: 1 -> contains span, 0 -> empty
+         PageSpanDescriptor paging = 0; // Unused page span map (in AVL Tree)
+         PageSpanDescriptor spans[cst::SpaceSizeL2 - cst::PageSizeL2];
+
+         void PushSpan(PageSpanDescriptor span) {
+            auto& anchor = this->spans[span->lengthL2];
+            span->bucketAnchor = &anchor;
+            span->bucketNext = anchor;
+            anchor = span;
+            this->lengthsMap |= uint32_t(1) << span->lengthL2;
+            this->paging = AVL::Operators::insertAt(this->paging, &AVL::Insert(span), span);
+         }
+         PageSpanDescriptor PullSpan(size_t minLengthL2) {
+            auto flengthL2 = GetAvailableSizeL2(minLengthL2, this->lengthsMap);
+            if (flengthL2 >= 0) {
+               auto span = this->spans[flengthL2];
+               span->bucketAnchor[0] = span->bucketNext;
+               this->paging = AVL::Operators::removeAt(this->paging, &AVL::Key(span->ptr), span);
+               if (!this->spans[flengthL2]) {
+                  this->lengthsMap ^= uint32_t(1) << flengthL2;
+               }
+               return span;
+            }
+            return 0;
+         }
+         uintptr_t MakeSpan(size_t lengthL2, BlockDescriptorBucket& blocks) {
+            if (auto span = this->PullSpan(lengthL2)) {
+               auto spanPtr = span->ptr;
+               blocks.PushBlock(new(span) sBlockDescriptor(6));
+               return SlicePageSpan(spanPtr, span->lengthL2, lengthL2, blocks);
+            }
+            return 0;
+         }
+         uintptr_t SlicePageSpan(uintptr_t spanPtr, size_t fromLengthL2, size_t toLengthL2, BlockDescriptorBucket& blocks) {
+            while (fromLengthL2 > toLengthL2) {
+               auto buddyBit = cst::PageSize << (--fromLengthL2);
+               auto buddy = new(blocks.MakeBlock(6)) sPageSpanDescriptor(spanPtr | buddyBit, fromLengthL2);
+               PushSpan(buddy);
+            }
+            return spanPtr;
+         }
+         void FeedBlocksBucket(BlockDescriptorBucket& blocks) {
+            if (auto span = this->PullSpan(0)) {
+               auto spanPtr = span->ptr;
+               OSMemory::CommitMemory(spanPtr, cst::PageSize);
+               blocks.PushBlock(new(ptr_t(spanPtr)) sBlockDescriptor(cst::PageSizeL2));
+               SlicePageSpan(spanPtr, span->lengthL2, 0, blocks);
+            }
+         }
+      };
+
+      std::mutex lock;
+      BlockDescriptorBucket blocks;
+      PageSpanDescriptorBucket spans;
+      sDescriptorArena arena;
+      uint32_t lengthL2 = 0;
+
+      static sDescriptorHeap* New(size_t countL2);
+
+      size_t GetSize() override {
+         return 0;
+      }
+      sDescriptor* GetDescriptorAt(index_t index) {
+         return 0;
+      }
+      template<typename T, typename ...Targ>
+      T* New(Targ... args) {
+         auto sizeL2 = GetBlockSizeL2(sizeof(T));
+         auto result = new(this->Allocate(sizeL2, sizeL2)) T(args...);
+         _ASSERT(!result || result->GetSize() == sizeof(T));
+         return result;
+      }
+      template<typename T, typename ...Targ>
+      T* NewBuffer(size_t size, Targ... args) {
+         _ASSERT(size >= sizeof(T));
+         auto sizeL2 = GetBlockSizeL2(size);
+         auto result = new(this->Allocate(sizeL2, sizeL2)) T(args...);
+         _ASSERT(!result || result->GetSize() == size);
+         return result;
+      }
+      template<typename T, typename ...Targ>
+      T* NewExtensible(size_t size, Targ... args) {
+         auto sizeL2 = GetBlockSizeL2(size);
+
+         size_t usedSizeL2 = 0;
+         if (sizeL2 <= cst::PageSizeL2) usedSizeL2 = sizeL2;
+         else if (sizeof(T) >= cst::PageSize) usedSizeL2 = GetBlockSizeL2(sizeof(T));
+         else usedSizeL2 = cst::PageSizeL2;
+
+         auto result = new(this->Allocate(sizeL2, usedSizeL2)) T(size_t(1) << usedSizeL2, size_t(1) << sizeL2, args...);
+         _ASSERT(!result || result->GetSize() >= size);
+         _ASSERT(!result || result->GetUsedSize() >= (1 << usedSizeL2));
+         return result;
+      }
+      ptr_t Allocate(size_t sizeL2, size_t usedSizeL2 = 0) {
+         std::lock_guard<std::mutex> guard(this->lock);
+         if (sizeL2 < cst::PageSizeL2) {
+            auto block = this->blocks.MakeBlock(sizeL2);
+            if (!block) {
+               this->spans.FeedBlocksBucket(this->blocks);
+               block = this->blocks.MakeBlock(sizeL2);
+            }
+            _ASSERT(block);
+            return block;
          }
          else {
-            exp = 0;
-            if (!(base = size)) return;
+            _ASSERT(usedSizeL2 >= cst::PageSizeL2);
+            auto lengthL2 = sizeL2 - cst::PageSizeL2;
+            auto spanPtr = this->spans.MakeSpan(lengthL2, this->blocks);
+            OSMemory::CommitMemory(spanPtr, size_t(1) << usedSizeL2);
+            return ptr_t(spanPtr);
          }
-         if (size != (base << exp)) base++;
-         while ((base & 1) == 0) { exp++; base >>= 1; }
-         this->packing = base;
-         this->shift = exp;
-         _ASSERT(size > this->lower() && size <= this->value());
       }
-      size_t value() {
-         return size_t(this->packing) << this->shift;
+      void Extends(sDescriptor* entry, size_t extendedSize) {
+         auto sizeL2 = GetBlockSizeL2(extendedSize);
+         OSMemory::CommitMemory(uintptr_t(entry), size_t(1) << sizeL2);
+         entry->SetUsedSize(size_t(1) << sizeL2);
+         _ASSERT(entry->GetUsedSize() == (size_t(1) << sizeL2));
       }
-      size_t lower() {
-         if (this->shift > 3) {
-            if (this->packing > 1) return (this->packing - size_t(1)) << this->shift;
-            else return size_t(7) << (this->shift - 3);
+      void Dispose(sDescriptor* entry) {
+         std::lock_guard<std::mutex> guard(this->lock);
+         auto sizeL2 = GetBlockSizeL2(entry->GetSize());
+         if (sizeL2 < cst::PageSizeL2) {
+            blocks.PushBlock(new(entry) sBlockDescriptor(sizeL2));
          }
-         else return 0;
+         else {
+            OSMemory::DecommitMemory(uintptr_t(entry), size_t(1) << sizeL2);
+            auto lengthL2 = sizeL2 - cst::PageSizeL2;
+            auto span = new(this->blocks.MakeBlock(6)) sPageSpanDescriptor(uintptr_t(entry), lengthL2);
+            spans.PushSpan(span);
+         }
       }
-   };
+   private:
+      sDescriptorHeap(uint32_t countL2) {
 
-   //-------------------------------------------------------
-   // Memory space descriptors
-   //-------------------------------------------------------
-   struct PageEntry {
-      uint64_t layoutID : 8;
-      uint64_t reference : 56;
-   };
-   static_assert(sizeof(PageEntry) == 8, "bad size");
+         // Register committed page
+         index_t descSizeL2 = GetBlockSizeL2(sizeof(*this));
+         blocks.SliceBlockBuffer(this, cst::PageSizeL2, descSizeL2);
 
-#pragma pack(push,1)
-   typedef struct PageDescriptor {
-      uint64_t uses; // Bitmap of allocated entries
-      uint64_t usables; // Bitmap of allocable entries
-      uint64_t gc_marks; // Bitmap of gc marked entries
-      uint64_t gc_analyzis; // Bitmap of gc analyzed entries
-      uint32_t page_index; // Absolute page index
-      uint8_t class_id;
-   } *tpPageDescriptor;
-#pragma pack(pop)
-
-   // Page: is a memory zone of one block or paved with slab
-#pragma pack(push,1)
-   typedef struct SlabBatchDescriptor : PageDescriptor {
-      uint8_t length;
-      SlabBatchDescriptor* next;
-
-      uint8_t __reserve[18];
-   } *tpSlabBatchDescriptor;
-   static_assert(sizeof(SlabBatchDescriptor) == 64, "bad size");
-#pragma pack(pop)
-
-   // Slab: is a memory zone paved with same size blocks
-#pragma pack(push,1)
-   typedef struct SlabDescriptor : PageDescriptor {
-      uint8_t context_id;
-      uint8_t slab_position; // Slab position in a desriptors array, 0 when slab is alone
-      uint8_t block_ratio_shift; // Slab index in a desriptors array, 0 when slab is alone
-      union {
-         uint8_t needAnalysis : 1;
-      };
-      uint8_t __reserve[7];
-      std::atomic_uint64_t shared_freemap;
-      SlabDescriptor* next; // Chaining slot to link slab in a slab queue
-
-   } *tpSlabDescriptor;
-   static_assert(sizeof(SlabDescriptor) == 64, "bad size");
-#pragma pack(pop)
-
-   //-------------------------------------------------------
-   // Memory slicing model
-   //-------------------------------------------------------
-   struct PageLayout {
-      uint32_t offset;
-      uint32_t scale;
-   };
-
-   class ElementClass {
-   public:
-      uint8_t id = -1;
-      ElementClass(uint8_t id);
-   };
-
-   class SlabClass : public ElementClass {
-   public:
-      SlabClass(uint8_t id);
-      virtual tpSlabDescriptor allocate(MemoryContext* context) = 0;
-      virtual void release(tpSlabDescriptor slab, MemoryContext* context) = 0;
-      virtual sizeid_t getSlabSize() = 0;
-   };
-
-   class BlockClass : public ElementClass {
-   public:
-      BlockClass(uint8_t id);
-      virtual address_t allocate(size_t target, MemoryContext* context) = 0;
-      virtual void receivePartialSlab(tpSlabDescriptor slab, MemoryContext* context) = 0;
-      virtual SlabClass* getSlabClass() = 0;
-      virtual size_t getSizeMax() = 0;
-      virtual sizeid_t getBlockSize() { throw; }
-      virtual void print() = 0;
+         // Register free page spans
+         this->lengthL2 = countL2 + cst::ArenaSizeL2 - cst::PageSizeL2;
+         spans.SlicePageSpan(uintptr_t(this), this->lengthL2, 0, blocks);
+      }
+      static size_t GetBlockSizeL2(size_t size) {
+         size_t sizeL2 = log2_ceil_32(size);
+         if (sizeL2 < 6) return 6;
+         return sizeL2;
+      }
+      static int32_t GetAvailableSizeL2(size_t sizeL2, uint32_t sizesMap) {
+         auto bitmap = sizesMap & umask_32(sizeL2);
+         if (!bitmap) return -1;
+         return lsb_32(bitmap);
+      }
    };
 
 }
-

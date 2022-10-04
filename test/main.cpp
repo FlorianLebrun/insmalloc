@@ -1,63 +1,169 @@
-#include "./handlers.h"
+#include <ins/memory/space.h>
+#include <ins/memory/objects-context.h>
+#include <ins/memory/heap.h>
+#include <ins/devtools.h>
+#include <stdio.h>
+#include <vector>
 
 using namespace ins;
 
-extern void test_perf_alloc();
-extern void test_buddy_bitmap();
-extern void test_unit_span_alloc();
-extern void test_unit_fragment_alloc();
-extern void test_page_access();
+void test_descriptor_region() {
+   auto region = sDescriptorHeap::New(0);
 
-extern void test_objects_allocate();
+   struct TestExtDesc : sDescriptor {
+      size_t commited;
+      size_t size;
 
-ins::MemoryContext* ins_malloc_handler::context = 0;
+      TestExtDesc(size_t commited, size_t size) : size(size), commited(commited) {
+         for (int i = sizeof(*this); i < commited; i++) ((char*)this)[i] = 0;
+         this->Resize(size);
+         for (int i = sizeof(*this); i < size; i++) ((char*)this)[i] = 0;
+      }
+      virtual size_t GetSize() {
+         return this->size;
+      }
+      virtual void SetUsedSize(size_t commited) {
+         this->commited = commited;
+      }
+      virtual size_t GetUsedSize() {
+         return this->commited;
+      }
+   };
+   auto desc = region->NewExtensible<TestExtDesc>(1000000);
+   desc->Dispose();
 
+   struct TestDesc : sDescriptor {
+      virtual size_t GetSize() {
+         return sizeof(*this);
+      }
+   };
 
-class GCObject {
-public:
-   void* operator new (size_t sz) {
-      return ins_malloc_handler::context->allocateBlock(sz);
+   std::vector<Descriptor> descs;
+   for (int i = 0; i < 10000; i++) {
+      auto desc = region->New<TestDesc>();
+      descs.push_back(desc);
    }
-};
-
-class Test1 : public GCObject {
-public:
-   Test1* a = 0;
-   Test1(int l) {
-      if (l) a = new Test1(l - 1);
+   for (auto desc : descs) {
+      desc->Dispose();
    }
-};
+}
 
-void test_gc() {
-   ins::GarbageCollector gc(ins_malloc_handler::context->space);
-   Test1* obj = new Test1(10);
-   gc.roots.push_back(obj);
-   gc.scavenge();
-   obj->a->a->a = 0;
-   gc.scavenge();
-   obj->a = 0;
-   gc.scavenge();
+void apply_cross_context_private_alloc(ObjectClassContext& contextAlloc, ObjectClassContext& contextDispose) {
+   {
+      auto obj = contextAlloc.AllocatePrivateObject();
+      contextDispose.FreeObject(obj, ObjectRegion(MemorySpace::GetRegionDescriptor(obj)));
+      contextAlloc.CheckValidity();
+   }
+   {
+      size_t count = 2000;
+      std::vector<ObjectHeader> objects;
+      for (int i = 0; i < count; i++) {
+         objects.push_back(0);
+      }
+      for (int cycle = 0; cycle < 2; cycle++) {
+         for (int i = 0; i < count; i++) {
+            //printf("! acquire %d\n", i);
+            auto obj = contextAlloc.AllocatePrivateObject();
+            objects[i] = obj;
+         }
+         _INS_DEBUG(MemorySpace::Print());
+         contextAlloc.CheckValidity();
+         for (int i = 0; i < count; i++) {
+            //printf("! dispose %d\n", i);
+            auto obj = objects[i];
+            contextDispose.FreeObject(obj, ObjectRegion(MemorySpace::GetRegionDescriptor(obj)));
+         }
+         _INS_DEBUG(MemorySpace::Print());
+         contextAlloc.CheckValidity();
+      }
+      contextAlloc.CheckValidity();
+   }
+}
+
+
+void apply_cross_context_shared_alloc(ObjectClassContext& contextAlloc, ObjectClassContext& contextDispose) {
+   {
+      auto obj = contextAlloc.AllocateSharedObject();
+      contextDispose.FreeObject(obj, ObjectRegion(MemorySpace::GetRegionDescriptor(obj)));
+      contextAlloc.CheckValidity();
+   }
+   {
+      size_t count = 2000;
+      std::vector<ObjectHeader> objects;
+      for (int i = 0; i < count; i++) {
+         objects.push_back(0);
+      }
+      for (int cycle = 0; cycle < 2; cycle++) {
+         for (int i = 0; i < count; i++) {
+            //printf("! acquire %d\n", i);
+            auto obj = contextAlloc.AllocateSharedObject();
+            objects[i] = obj;
+         }
+         _INS_DEBUG(MemorySpace::Print());
+         contextAlloc.CheckValidity();
+         for (int i = 0; i < count; i++) {
+            //printf("! dispose %d\n", i);
+            auto obj = objects[i];
+            contextDispose.FreeObject(obj, ObjectRegion(MemorySpace::GetRegionDescriptor(obj)));
+         }
+         _INS_DEBUG(MemorySpace::Print());
+         contextAlloc.CheckValidity();
+      }
+      contextAlloc.CheckValidity();
+   }
+   {
+      size_t count = 2000000;
+      for (int i = 0; i < count; i++) {
+         auto obj = contextAlloc.AllocateSharedObject();
+         contextDispose.FreeObject(obj, ObjectRegion(MemorySpace::GetRegionDescriptor(obj)));
+      }
+      _INS_DEBUG(MemorySpace::Print());
+      contextAlloc.CheckValidity();
+   }
+}
+
+void test_private_object(MemoryHeap& heap) {
+   auto contextA = heap.AcquireContext();
+   auto contextB = heap.AcquireContext();
+   int classId = 4;
+
+   ObjectClassHeap& heapObj = heap.objects[classId];
+   ObjectClassContext& contextObjA = contextA->objects[classId];
+   ObjectClassContext& contextObjB = contextB->objects[classId];
+
+   apply_cross_context_private_alloc(contextObjA, contextObjA);
+   apply_cross_context_private_alloc(contextObjA, contextObjB);
+
+   heap.DisposeContext(contextA);
+   heap.DisposeContext(contextB);
+}
+
+void test_shared_object(MemoryHeap& heap) {
+   auto contextA = heap.AcquireContext();
+   auto contextB = heap.AcquireContext();
+   int classId = 4;
+
+   ObjectClassHeap& heapObj = heap.objects[classId];
+   ObjectClassContext& contextObjA = contextA->objects[classId];
+   ObjectClassContext& contextObjB = contextB->objects[classId];
+
+   apply_cross_context_shared_alloc(contextObjA, contextObjA);
+   apply_cross_context_shared_alloc(contextObjA, contextObjB);
+
+   heap.DisposeContext(contextA);
+   heap.DisposeContext(contextB);
 }
 
 int main() {
-   ins::PatchMemoryFunctions();
+   MemoryHeap heap;
+   //ins::generate_objects_layout_config("C:/git/project/insmalloc/lib/ins.memory.space");
+   test_private_object(heap);
+   test_shared_object(heap);
+   //test_descriptor_region();
 
-   ins_malloc_handler::init();
-
-   test_gc();
-   //test_buddy_bitmap();
-   //test_unit_span_alloc();
-   //test_unit_fragment_alloc();
-   //test_page_access();
-   //test_perf_alloc();
-   //test_objects_allocate();
-
-   ins_malloc_handler::context->scavenge();
-   ins_malloc_handler::context->space->scavengeCaches();
-
-   ins_malloc_handler::context->getStats();
-   ins_malloc_handler::context->space->getStats();
-
+   heap.Clean();
+   heap.CheckValidity();
+   MemorySpace::Print();
    return 0;
 }
 

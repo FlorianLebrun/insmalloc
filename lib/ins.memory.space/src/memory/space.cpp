@@ -1,244 +1,169 @@
 #include <ins/memory/space.h>
-#include <ins/memory/context.h>
-#include "../os/memory.h"
 
 using namespace ins;
 
-MemorySpace::MemorySpace() {
-   for (int packing = 1; packing <= 7; packing += 2) {
-      this->pageSpans_manifolds[packing >> 1].packing = packing;
-   }
+static sArenaDescriptor UnusedArena(cst::ArenaSizeL2);
+static sArenaDescriptor ForbiddenArena(cst::ArenaSizeL2);
+static std::mutex arenas_lock;
+MemorySpace::tMemoryState MemorySpace::state;
 
-   for (int i = 0; i < cSlabBinCount; i++) {
-      SlabClass* cls = cSlabBinTable[i];
-      this->slabs_bins[i].element_size = cls->getSlabSize();
+MemorySpace::tMemoryState::tMemoryState() {
+   if (this != &MemorySpace::state) {
+      throw std::exception("singleton");
    }
-
-   this->createRegion(1);
+   for (int i = 0; i < cst::ArenaPerSpace; i++) {
+      this->table[i] = ArenaEntry(&UnusedArena);
+   }
+   this->descriptorHeap = sDescriptorHeap::New(0);
 }
 
-MemorySpace::~MemorySpace() {
-   for (size_t i = 0; i < 256; i++) {
-      if (auto region = this->regions[i]) {
-         region->MemoryRegion32::~MemoryRegion32();
-         OSMemory::ReleaseMemory(uintptr_t(region), cPageSize);
-         this->regions[i] = 0;
-      }
-   }
+void MemorySpace::SetRegionEntry(address_t address, RegionEntry entry) {
+   auto arena = state.table[address.arenaID];
+   auto regionID = address.position >> arena.segmentation;
+   arena.descriptor()->regions[regionID] = entry;
 }
 
-MemoryRegion32* MemorySpace::createRegion(size_t regionID) {
-   _ASSERT(!this->regions[regionID]);
-   auto base = regionID << cRegionSizeL2;
-   auto region = (MemoryRegion32*)OSMemory::AllocBuffer(base, base + cRegionSize, cUnitSize, cUnitSize);
-   _ASSERT(region);
-   OSMemory::CommitMemory(uintptr_t(region), cPageSize);
-   region->MemoryRegion32::MemoryRegion32(regionID);
-   return this->regions[regionID] = region;
+RegionEntry MemorySpace::GetRegionEntry(address_t address) {
+   auto arena = state.table[address.arenaID];
+   auto regionID = address.position >> arena.segmentation;
+   return arena.descriptor()->regions[regionID];
 }
 
-MemoryUnit* MemorySpace::tryAcquireUnitSpan(size_t length) {
-   for (size_t i = 0; i < 256; i++) {
-      if (auto region = this->regions[i]) {
-         auto result = region->acquireUnitSpan(length);
-         if (result) return result;
-      }
+Descriptor MemorySpace::GetRegionDescriptor(address_t address) {
+   auto arena = state.table[address.arenaID];
+   auto regionID = address.position >> arena.segmentation;
+   auto regionEntry = arena.descriptor()->regions[regionID];
+   if (!regionEntry.IsFree()) {
+      address.position = regionID << arena.segmentation;
+      return Descriptor(address.ptr);
    }
    return 0;
 }
 
-MemoryUnit* MemorySpace::acquireUnitSpan(size_t length) {
-   MemoryUnit* unit = this->tryAcquireUnitSpan(length);
-   if (!unit) {
-      this->scavengeCaches();
-      unit = this->tryAcquireUnitSpan(length);
-      if (!unit) {
-         this->print();
-         printf(" /!\\ Missing free unit span\n");
+address_t MemorySpace::ReserveArena() {
+   return OSMemory::ReserveMemory(0, cst::SpaceSize, cst::ArenaSize, cst::ArenaSize);
+}
+
+address_t MemorySpace::AllocateRegion(uint32_t sizing) {
+   std::lock_guard<std::mutex> guard(state.lock);
+   auto& bucket = state.arenas[sizing];
+
+   // Acquire a arena with availables regions
+   auto arena = bucket.availables;
+   if (!arena) {
+      address_t base = MemorySpace::ReserveArena();
+      if (!base) throw std::exception("OOM");
+      arena = state.descriptorHeap->NewBuffer<sArenaDescriptor>(sArenaDescriptor::GetSize(sizing), sizing);
+      arena->base = base;
+      arena->next = bucket.availables;
+      state.table[base.arenaID] = arena;
+      bucket.availables = arena;
+   }
+
+   // Remove arena from availables list
+   if (0 == --arena->availables_count) {
+      bucket.availables = arena->next;
+      arena->next = 0;
+   }
+
+   // Find free region in arena 
+   auto size = size_t(1) << sizing;
+   for (int i = 0; i < (cst::ArenaSize >> sizing); i++) {
+      auto& tag = arena->regions[i];
+      if (tag.IsFree()) {
+         address_t ptr = arena->base + i * size;
+         OSMemory::CommitMemory(ptr, size);
+         tag = RegionEntry::cOpaqueBits;
+         return ptr;
       }
    }
-   return unit;
+   throw std::exception("crash");
 }
 
-address_t MemorySpace::acquirePageSpan(size_t packing, size_t shift) {
-   if (shift < cPagePerUnitL2) {
-      MemoryPageSpanManifold& manifold = this->pageSpans_manifolds[packing >> 1];
-      return manifold.acquirePageSpan(this, shift);
+void MemorySpace::DisposeRegion(address_t address) {
+   auto arena = state.table[address.arenaID];
+   auto regionID = address.position >> arena.segmentation;
+   auto regionSize = size_t(1) << arena.segmentation;
+   auto regionOffset = address.position & (regionSize - 1);
+   auto& regionEntry = arena.descriptor()->regions[regionID];
+   if (regionOffset == 0 && !regionEntry.IsFree()) {
+      OSMemory::DecommitMemory(address.ptr, regionSize);
+      regionEntry = RegionEntry::cFreeBits;
    }
    else {
-      auto unit = this->acquireUnitSpan(packing << (shift - cPagePerUnitL2));
-      return unit->address();
-   }
-}
-
-address_t MemorySpace::acquirePageSpan(size_t length) {
-   const uintptr_t cMaxSpanSizeForFragmentedUnit = 7 << cPagePerUnitL2;
-
-   if (length <= cMaxSpanSizeForFragmentedUnit) {
-      size_target_t target(length);
-      MemoryPageSpanManifold& manifold = this->pageSpans_manifolds[target.packing >> 1];
-      return manifold.acquirePageSpan(this, target.shift);
-   }
-   else {
-      auto unit = this->acquireUnitSpan(alignX(length, cPagePerUnit) >> cPagePerUnitL2);
-      return unit->address();
+      throw std::exception("Mis aligned");
    }
 }
 
-void MemorySpace::releasePageSpan(address_t base, size_t length) {
-   _ASSERT(length > 0);
-   auto region = this->regions[base.unit.regionID];
-   auto unit = &region->units_table[base.unit.unitID];
-   if (unit->isFragmented) {
-      size_target_t target(length);
-      this->pageSpans_manifolds[target.packing].releasePageSpan(this, base, target.shift);
-   }
-   else {
-      region->releaseUnitSpan(unit, base.unit.pageID);
-   }
-}
-
-void MemorySpace::registerContext(MemoryContext* context) {
-   if (context->space != 0 || context->id != 0) throw;
-   std::lock_guard<std::mutex> guard(this->contexts_lock);
-   if (!this->contexts || this->contexts->id > 1) {
-      context->id = 1;
-      context->next_context = this->contexts;
-      context->space = this;
-      this->contexts = context;
-   }
-   else {
-      for (auto ctx = this->contexts; ctx; ctx = ctx->next_context) {
-         if (!ctx->next_context || ctx->next_context->id != ctx->id + 1) {
-            context->id = ctx->id + 1;
-            context->next_context = ctx->next_context;
-            context->space = this;
-            ctx->next_context = context;
-            break;
+void MemorySpace::ForeachRegion(std::function<bool(ArenaDescriptor arena, RegionEntry entry, address_t addr)>&& visitor) {
+   for (address_t addr; addr.arenaID < cst::ArenaPerSpace; addr.arenaID++) {
+      auto arena = state.table[addr.arenaID].descriptor();
+      auto region_size = size_t(1) << arena->sizing;
+      auto region_count = arena->GetRegionCount();
+      addr.position = 0;
+      for (size_t regionID = 0; regionID < region_count; regionID++) {
+         auto& region_entry = arena->regions[regionID];
+         if (!region_entry.IsFree()) {
+            if (!visitor(arena, region_entry, addr)) return;
          }
+         addr.position += region_size;
       }
    }
 }
 
-void MemorySpace::unregisterContext(MemoryContext* context) {
-   if (context->space != this || context->id == 0) throw;
-
-   // Clean context memory cache
-   context->scavenge();
-
-   // Remove context
-   std::lock_guard<std::mutex> guard(this->contexts_lock);
-   for (auto pctx = &this->contexts; *pctx; pctx = &(*pctx)->next_context) {
-      if (*pctx == context) {
-         *pctx = context->next_context;
-         context->id = 0;
-         context->space = 0;
-         context->next_context = 0;
-         return;
-      }
-   }
-   throw "not found";
-}
-
-void MemorySpace::scavengeCaches() {
-   for (int i = 0; i < cSlabBinCount; i++) {
-      auto& bin = this->slabs_bins[i];
-      bin.scavenge(this);
-   }
-   for (int i = 0; i < cPackingCount; i++) {
-      this->pageSpans_manifolds[i].scavengeCaches(this);
-   }
-}
-
-void MemorySpace::check() {
-   for (size_t i = 0; i < 256; i++) {
-      if (auto region = this->regions[i]) {
-         region->check();
-      }
-   }
-}
-
-void MemorySpace::print() {
-   printf("------- begin -------\n");
-   for (size_t i = 0; i < 256; i++) {
-      if (auto region = this->regions[i]) {
-         region->print();
-      }
-   }
-   printf("------- end -------\n");
-}
-
-void MemorySpace::getStats() {
-   int slabCacheSize = 0;
-   int slabEmptySpanCount = 0;
-   for (int i = 0; i < cSlabBinCount; i++) {
-      ElementClassStats stats;
-      auto cls = cSlabBinTable[i];
-      auto& bin = this->slabs_bins[i];
-      bin.getStats(stats);
-      auto cache_size = stats.element_cached_count * bin.element_size.size();
-      printf("slab '%d': count=%zd, empty_batch=%zd/%zd\n", i, stats.element_cached_count, stats.slab_empty_count, stats.slab_count);
-      slabCacheSize += cache_size;
-   }
-   printf("> slab cache=%d\n", slabCacheSize);
-}
-
-void MemorySpace::SlabBin::getStats(ElementClassStats& stats) {
-   for (auto batch = this->batches; batch; batch = batch->next) {
-      auto uses = batch->uses;
-      stats.element_cached_count += Bitmap64(batch->usables ^ uses).count();
-      if (uses == batch->usables) stats.slab_full_count++;
-      if (uses == 0) stats.slab_empty_count++;
-      stats.slab_count++;
-   }
-}
-
-void MemorySpace::SlabBin::scavenge(MemorySpace* space) {
-   std::lock_guard<std::mutex> guard(this->lock);
-   auto pprev = &this->batches;
-   while (auto batch = *pprev) {
-      if (batch->uses == 0) {
-         *pprev = batch->next;
-         auto cls = cBlockClassTable[batch->class_id];
-         printf("lost batch\n");
-      }
-      else {
-         pprev = &(*pprev)->next;
-      }
-   }
-}
-
-tpSlabDescriptor MemorySpace::SlabBin::pop(MemorySpace* space, uint8_t context_id) {
-   std::lock_guard<std::mutex> guard(this->lock);
-   if (auto batch = this->batches) {
-
-      // Find index and tag it
-      uint64_t availables = batch->usables ^ batch->uses;
-      INS_ASSERT(availables != 0);
-      size_t index = lsb_64(availables);
-      batch->uses |= uint64_t(1) << index;
-      size_t position = index + 1;
-
-      // On batch is full
-      if (batch->uses == batch->usables) {
-         this->batches = batch->next;
-      }
-
-      // Format slab
-      auto slab = tpSlabDescriptor(&batch[position]);
-      slab->context_id = context_id;
-      slab->class_id = 0;
-      slab->block_ratio_shift = 0;
-      slab->slab_position = position;
-      slab->page_index = batch->page_index;
-      slab->gc_marks = 0;
-      slab->gc_analyzis = 0;
-      slab->uses = 0;
-      slab->usables = 0;
-      slab->shared_freemap = 0;
-      slab->next = 0;
-
-      return slab;
+ObjectHeader MemorySpace::GetObject(address_t address) {
+   auto arena = state.table[address.arenaID];
+   auto regionID = address.position >> arena.segmentation;
+   auto regionTag = arena.descriptor()->regions[regionID];
+   if (!regionTag.hasNoObjects) {
+      auto regionMask = (size_t(1) << arena.segmentation) - 1;
+      auto region = (sObjectRegion*)(uintptr_t(address.ptr) & regionMask);
+      return 0;
    }
    return 0;
 }
+
+void MemorySpace::ForeachObjectRegion(std::function<bool(ObjectRegion)>&& visitor) {
+   MemorySpace::ForeachRegion(
+      [&](ArenaDescriptor arena, RegionEntry entry, address_t addr) {
+         if (entry.IsObjectRegion()) {
+            return visitor(ObjectRegion(addr.ptr));
+         }
+         return true;
+      }
+   );
+}
+
+void MemorySpace::tMemoryState::ScheduleHeapMaintenance(ins::ObjectClassHeap* heap) {
+}
+
+void MemorySpace::tMemoryState::RunController() {
+
+}
+
+void MemorySpace::Print() {
+   MemorySpace::ForeachRegion(
+      [&](ArenaDescriptor arena, RegionEntry entry, address_t addr) {
+         auto region_size = size_t(1) << arena->sizing;
+         printf("\n%X%.8X %lld bytes", addr.arenaID, addr.position, region_size);
+         if (!entry.hasNoObjects) {
+            auto region = ObjectRegion(addr.ptr);
+            auto nobj = region->objects_bin.length() + region->shared_bin.length();
+            auto nobj_max = region->infos.object_count;
+            printf(": layout(%d) objects(%d/%d)", region->layout, nobj, nobj_max);
+            printf(" owner(%p)", region->owner);
+            if (region->IsDisposable()) printf(" [empty]");
+         }
+         else if (entry.hasDescriptor) {
+            auto region = Descriptor(addr.ptr);
+            printf(": classname(%s)", typeid(region).name());
+         }
+         else {
+            printf(": opaque");
+         }
+         return true;
+      }
+   );
+   printf("\n");
+}
+
