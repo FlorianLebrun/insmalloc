@@ -126,3 +126,4 @@ struct MultiThreadAllocTest {
    }
 };
 
+extern void test_perf_alloc();

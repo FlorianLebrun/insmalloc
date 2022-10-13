@@ -6,9 +6,9 @@
 
 using namespace ins;
 
-sObjectRegion* sObjectRegion::New(uint8_t layout) {
+sSlabbedObjectRegion* sSlabbedObjectRegion::New(uint8_t layout) {
    auto& infos = ObjectLayoutInfos[layout];
-   auto region = new(MemorySpace::AllocateRegion(infos.region_sizeL2)) sObjectRegion(layout);
+   auto region = new(MemorySpace::AllocateRegion(infos.region_sizeL2)) sSlabbedObjectRegion(layout);
    MemorySpace::SetRegionEntry(region, RegionEntry::ObjectRegion(layout));
    return region;
 }

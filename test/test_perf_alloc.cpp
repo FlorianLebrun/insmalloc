@@ -111,12 +111,15 @@ struct tTest {
          int size = sizeMin + (sizeDelta ? fastrand() % sizeDelta : 0);
          auto ptr = objects[i] = handler::malloc(size);
          if (!ptr) throw;
+         ins::ObjectBytes((void*)ptr)[0] = 1;
       }
       auto alloc_time_ns = c.GetDiffFloat(Chrono::NS);
 
       c.Start();
       for (int i = 0; i < count; i++) {
-         handler::free(objects[i]);
+         auto ptr = objects[i];
+         ins::ObjectBytes((void*)ptr)[0] = 1;
+         handler::free(ptr);
       }
       auto free_time_ns = c.GetDiffFloat(Chrono::NS);
 
@@ -139,13 +142,16 @@ struct tTest {
          for (int k = 0; k < alloc_count; k++) {
             int size = sizeMin + (sizeDelta ? fastrand() % sizeDelta : 0);
             auto ptr = handler::malloc(size);
+            _ASSERT(uintptr_t(ptr)>1000);
+            ins::ObjectBytes((void*)ptr)[0] = 1;
             //for (intptr_t k = 0; k < i; k++) INS_ASSERT(objects[k] != ptr);
             objects[i++] = ptr;
             ops++;
          }
          for (int k = 0; k < free_count; k++) {
             int p = fastrand() % i;
-            handler::free(objects[p]);
+            auto ptr = objects[p];
+            handler::free(ptr);
             objects[p] = objects[--i];
             objects[i] = 0;
             ops++;
@@ -183,10 +189,10 @@ struct tTest {
    void test_fill_and_flush() {
       printf("---------------- Pattern: fill & flush --------------------\n");
       for (int i = 0; i < 3; i++) {
-         //this->apply_fill_and_flush<no_malloc_handler>();
-         //this->apply_fill_and_flush<default_malloc_handler>();
+         this->apply_fill_and_flush<no_malloc_handler>();
+         this->apply_fill_and_flush<default_malloc_handler>();
+         this->apply_fill_and_flush<mi_malloc_handler>();
          this->apply_fill_and_flush<ins_malloc_handler>();
-         //this->apply_fill_and_flush<mi_malloc_handler>();
          printf("                     * * *\n");
       }
    }
@@ -196,8 +202,8 @@ struct tTest {
       for (int i = 0; i < 3; i++) {
          //this->apply_peak_drop<no_malloc_handler>(alloc_count, free_count);
          //this->apply_peak_drop<default_malloc_handler>(alloc_count, free_count);
-         this->apply_peak_drop<ins_malloc_handler>(alloc_count, free_count);
          //this->apply_peak_drop<mi_malloc_handler>(alloc_count, free_count);
+         this->apply_peak_drop<ins_malloc_handler>(alloc_count, free_count);
          printf("                     * * *\n");
       }
    }
@@ -205,9 +211,10 @@ struct tTest {
 
 
 void test_perf_alloc() {
+   ins_malloc_handler::init();
 
    tTest test;
-   test.setSizeProfile(16, 12560);
+   test.setSizeProfile(90, 90);
    //test.setSmallSizeProfile();
    //test.setMediumSizeProfile();
    //test.setBigSizeProfile();
@@ -215,8 +222,8 @@ void test_perf_alloc() {
 
    //test.test_ins_malloc_2();
    //test.test_alloc_perf();
-   test.test_peak_drop(10, 8);
-   //test.test_fill_and_flush();
+   //test.test_peak_drop(100, 80);
+   test.test_fill_and_flush();
    //test.test_multi_thread_perf();
    printf("------------------ end ------------------\n");
 }

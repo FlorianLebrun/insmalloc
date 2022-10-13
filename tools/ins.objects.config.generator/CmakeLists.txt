@@ -1,11 +1,10 @@
-set(target "ins.devtools")
+set(target "ins.objects.config.generator")
 
 append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" ROOT "./src" DIRECTORIES "./" "./binary" "./memory" "./os" "./os/win32")
 append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" ROOT "./include/ins" DIRECTORIES "./" "./binary" "./memory")
 
-add_library(${target} STATIC ${files})
+add_executable(${target} WIN32 ${files})
 set_target_properties(${target} PROPERTIES FOLDER "Tools")
 
-target_include_directories(${target} PUBLIC "./include")
-
 target_link_libraries(${target} PUBLIC ins.avl ins.memory.space)
+target_link_options(${target} PRIVATE /SUBSYSTEM:CONSOLE)

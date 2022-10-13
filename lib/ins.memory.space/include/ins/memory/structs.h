@@ -63,6 +63,8 @@ namespace ins {
       address_t(void* ptr) : ptr(uintptr_t(ptr)) {}
       operator uintptr_t() { return ptr; }
       operator void* () { return (void*)ptr; }
+      template<typename T>
+      T* as() { return (T*)ptr; }
    };
    static_assert(sizeof(address_t) == 8, "bad size");
 #pragma pack(pop)
@@ -131,4 +133,10 @@ namespace ins {
    struct exception_missing_memory : std::exception {
 
    };
+
+   template<typename T>
+   static constexpr T* none() {
+      return (T*)-1;
+   }
+
 }

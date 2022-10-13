@@ -10,7 +10,7 @@ LANGUAGES ASM_MASM C CXX CSharp
 add_subdirectory(./node_modules/AVL-Tree/lib)
 add_subdirectory(./lib/ins.memory.hooks)
 add_subdirectory(./lib/ins.memory.space)
-add_subdirectory(./tools/ins.devtools)
+add_subdirectory(./tools/ins.objects.config.generator)
 add_subdirectory(./tools/mimalloc)
 add_subdirectory(./test)
 

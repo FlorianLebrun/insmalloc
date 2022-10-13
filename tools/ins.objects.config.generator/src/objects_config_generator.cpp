@@ -1,7 +1,6 @@
 #include <ins/binary/alignment.h>
 #include <ins/memory/space.h>
 #include <ins/memory/structs.h>
-#include <ins/devtools.h>
 #include <stdio.h>
 #include <vector>
 #include <fstream>
@@ -10,19 +9,28 @@
 using namespace ins;
 
 struct tObjectClass {
+   uint32_t layoutID = 0;
+   ObjectLayoutPolicy layoutPolicy = UncachedLargeObjectPolicy;
+
    size_t buffer_start = 0;
    size_t buffer_end = 0;
    size_t object_size = 0;
    size_t object_count = 0;
+   size_t object_divider = 0;
    size_t slab_count = 0;
+   uint32_t region_mask = -1;
    size_t region_sizeL2 = 0;
    size_t region_bytes = 0;
    size_t usable_bytes = 0;
    size_t lost_bytes = 0;
    bool selected = false;
-   tObjectClass() {
+
+   tObjectClass(ObjectLayoutPolicy layoutPolicy, size_t object_size) {
+      this->object_size = object_size;
    }
    tObjectClass(size_t object_size, size_t page_sizeL2) : object_size(object_size), region_sizeL2(page_sizeL2) {
+      this->object_divider = ins::getBlockDivider(object_size);
+      this->region_mask = ((size_t(1) << this->region_sizeL2) - 1);
       this->region_bytes = size_t(1) << this->region_sizeL2;
       this->usable_bytes = this->region_bytes - cst::ObjectRegionHeadSize;
 
@@ -55,13 +63,20 @@ struct tObjectClass {
       this->buffer_end = buffer_start + this->object_count * this->object_size;
       _ASSERT(this->buffer_end <= this->region_bytes);
 
+      // Compute layout policy
+      if (this->object_size == 0) this->layoutPolicy = UncachedLargeObjectPolicy;
+      else if (this->object_count > 1) this->layoutPolicy = SlabbedObjectPolicy;
+      else this->layoutPolicy = LargeObjectPolicy;
+
       //_ASSERT(this->slab_count <= cst::ObjectSlabPerRegionMax);
    }
-   std::string getPolicyName() {
-      if (this->region_sizeL2 == 0) return "ins::HugeSlabPolicy";
-      else if (this->region_sizeL2 <= cst::PageSizeL2) return "ins::SmallSlabPolicy";
-      else if (this->slab_count == 1) return "ins::MediumSlabPolicy";
-      return "ins::MediumSlabPolicy";
+   std::string getLayoutPolicyName() {
+      switch (this->layoutPolicy) {
+      case UncachedLargeObjectPolicy: return "ins::UncachedLargeObjectPolicy";
+      case SlabbedObjectPolicy: return "ins::SlabbedObjectPolicy";
+      case LargeObjectPolicy: return "ins::LargeObjectPolicy";
+      default: throw;
+      }
    }
    uint32_t getDivider() {
       auto div = ((uint64_t(1) << 16) + object_size - 1) / object_size;
@@ -77,9 +92,16 @@ struct tObjectClass {
       return div;
    }
    void print() {
-      printf("size=%d;objects=%d;slabs=%d;regionsz=%d;lost=%d\n", object_size, object_count, slab_count, size_t(1) << region_sizeL2, lost_bytes);
+      printf("[%s] size=%d;objects=%d;slabs=%d;regionsz=%d;lost=%d\n",
+         this->getLayoutPolicyName().c_str(), object_size, object_count,
+         slab_count, size_t(1) << region_sizeL2, lost_bytes
+      );
    }
-   static int __cdecl compare(tObjectClass* x, tObjectClass* y) {
+   static int __cdecl compare_object_size(tObjectClass* x, tObjectClass* y) {
+      return x->object_size - y->object_size;
+   }
+   static int __cdecl compare_layout_order(tObjectClass*& x, tObjectClass*& y) {
+      if (auto c = int(x->layoutPolicy) - int(y->layoutPolicy)) return c;
       return x->object_size - y->object_size;
    }
    static size_t keepSizeBit(size_t sz, int n) {
@@ -98,7 +120,7 @@ struct tObjectClass {
 
 std::vector<tObjectClass> computeObjectPotentialClasses(double gap_growth, size_t* page_templates, int page_templates_count, size_t min_size = 16) {
    std::vector<tObjectClass> classes;
-   classes.push_back(tObjectClass());
+   classes.push_back(tObjectClass(UncachedLargeObjectPolicy, 0));
    for (size_t page_sizeL2 = page_templates[0]; page_sizeL2 <= page_templates[page_templates_count - 1]; page_sizeL2++) {
       tObjectClass obj((size_t(1) << page_sizeL2) - cst::ObjectRegionHeadSize - sizeof(sObjectSlab), page_sizeL2);
       if (obj.isValid()) {
@@ -130,7 +152,7 @@ std::vector<tObjectClass> computeObjectPotentialClasses(double gap_growth, size_
          }
          prev = cur_cls;
       }
-      std::qsort(&classes[0], classes.size(), sizeof(tObjectClass), (_CoreCrtNonSecureSearchSortCompareFunction)tObjectClass::compare);
+      std::qsort(&classes[0], classes.size(), sizeof(tObjectClass), (_CoreCrtNonSecureSearchSortCompareFunction)tObjectClass::compare_object_size);
    }
    classes[0].object_size = 0;
    return classes;
@@ -166,19 +188,21 @@ std::vector<tObjectClass> filterObjectClasses(std::vector<tObjectClass> classes,
    return selected_classes;
 }
 
-void ins::generate_objects_layout_config(std::string path) {
+void generate_objects_layout_config(std::string path) {
    const double min_growth = 0.10;
    const double max_growth = 0.12;
    size_t pages[] = { 13,14,15,16,17,18,19,20 };
    auto classes = computeObjectPotentialClasses(0.02, pages, sizeof(pages) / sizeof(pages[0]));
    classes = filterObjectClasses(classes, 128, min_growth, max_growth);
+   classes.erase(classes.begin(), classes.begin() + 1);
+   classes.push_back(tObjectClass(UncachedLargeObjectPolicy, cst::ArenaSize));
 
    size_t cache_size = 0;
    size_t used_count = 0;
    size_t prev_size = 0;
    for (auto& cls : classes) {
       float growth = 100 * float(cls.object_size - prev_size) / float(cls.object_size);
-      printf("growth=%.3g%%;", growth);
+      printf("^%.3g%%\t", growth);
       if (cls.region_sizeL2) used_count++;
       cls.print();
       prev_size = cls.object_size;
@@ -189,15 +213,31 @@ void ins::generate_objects_layout_config(std::string path) {
    printf("classes=%d/%d\n", used_count, classes.size());
    printf("cache_size=%d/%d\n", cache_size);
 
-
-   size_t ObjectLayoutSize[256] = { 0 };
+   std::vector<tObjectClass*> layouts;
+   size_t SlabbedObjectPolicy_count = 0;
+   size_t LargeObjectPolicy_count = 0;
+   size_t NoObjectPolicy_count = 0;
    for (size_t i = 0; i < classes.size(); i++) {
-      ObjectLayoutSize[i] = classes[i].object_size;
+      layouts.push_back(&classes[i]);
    }
-   ObjectLayoutSize[classes.size()] = cst::ArenaSize;
+   std::qsort(&layouts[0], layouts.size(), sizeof(tObjectClass*), (_CoreCrtNonSecureSearchSortCompareFunction)tObjectClass::compare_layout_order);
+   for (size_t i = 0; i < layouts.size(); i++) {
+      layouts[i]->layoutID = i;
+      switch (layouts[i]->layoutPolicy) {
+      case SlabbedObjectPolicy:
+         SlabbedObjectPolicy_count = i;
+         break;
+      case LargeObjectPolicy:
+         LargeObjectPolicy_count = i;
+         break;
+      case UncachedLargeObjectPolicy:
+         NoObjectPolicy_count = i;
+         break;
+      default: throw;
+      }
+   }
 
    const size_t LayoutRangeSizeCount = 512;
-
    const size_t SmallSizeLimit = LayoutRangeSizeCount << 3;
    const size_t MediumSizeLimit = SmallSizeLimit << 4;
    const size_t LargeSizeLimit = MediumSizeLimit << 4;
@@ -210,70 +250,73 @@ void ins::generate_objects_layout_config(std::string path) {
    tLayoutRangeBin medium_object_layouts[LayoutRangeSizeCount];
    tLayoutRangeBin large_object_layouts[LayoutRangeSizeCount];
 
-   uint8_t layout = 1;
-   while (layout < classes.size()) {
-      auto& cls = classes[layout];
+   uint8_t clsIndex = 1;
+   while (clsIndex < classes.size()) {
+      auto& cls = classes[clsIndex];
       const size_t size_step = SmallSizeLimit / LayoutRangeSizeCount;
       size_t end_index = std::min(cls.object_size / size_step, LayoutRangeSizeCount);
       for (size_t i = end_index; i >= 0 && small_object_layouts[i] == 0; i--) {
-         small_object_layouts[i] = layout;
+         small_object_layouts[i] = cls.layoutID;
       }
       if (cls.object_size >= SmallSizeLimit) {
          _ASSERT(end_index == LayoutRangeSizeCount);
          break;
       }
-      layout++;
+      clsIndex++;
    }
-   while (layout < classes.size()) {
-      auto& cls = classes[layout];
+   while (clsIndex < classes.size()) {
+      auto& cls = classes[clsIndex];
       const size_t size_step = MediumSizeLimit / LayoutRangeSizeCount;
-      size_t prev_index = classes[layout - 1].object_size / size_step;
-      medium_object_layouts[prev_index].layoutMax = layout;
+      size_t prev_index = classes[clsIndex - 1].object_size / size_step;
+      medium_object_layouts[prev_index].layoutMax = cls.layoutID;
       for (size_t i = prev_index + 1; i < LayoutRangeSizeCount && (i * size_step) <= cls.object_size; i++) {
          auto& bin = medium_object_layouts[i];
-         bin.layoutMin = layout;
-         bin.layoutMax = layout;
+         bin.layoutMin = cls.layoutID;
+         bin.layoutMax = cls.layoutID;
       }
       if (cls.object_size >= MediumSizeLimit) {
          break;
       }
-      layout++;
+      clsIndex++;
    }
-   while (layout < classes.size()) {
-      auto& cls = classes[layout];
+   while (clsIndex < classes.size()) {
+      auto& cls = classes[clsIndex];
       const size_t size_step = LargeSizeLimit / LayoutRangeSizeCount;
-      size_t prev_index = classes[layout - 1].object_size / size_step;
-      large_object_layouts[prev_index].layoutMax = layout;
+      size_t prev_index = classes[clsIndex - 1].object_size / size_step;
+      large_object_layouts[prev_index].layoutMax = cls.layoutID;
       for (size_t i = prev_index + 1; i < LayoutRangeSizeCount && (i * size_step) <= cls.object_size; i++) {
          auto& bin = large_object_layouts[i];
-         bin.layoutMin = layout;
-         bin.layoutMax = layout;
+         bin.layoutMin = cls.layoutID;
+         bin.layoutMax = cls.layoutID;
       }
       if (cls.object_size >= LargeSizeLimit) {
          break;
       }
-      layout++;
+      clsIndex++;
    }
-   if (layout == classes.size()) {
+   if (clsIndex == classes.size()) {
+      auto& cls = classes[classes.size() - 1];
+      _ASSERT(cls.layoutPolicy == UncachedLargeObjectPolicy);
       const size_t size_step = LargeSizeLimit / LayoutRangeSizeCount;
-      size_t prev_index = classes[layout - 1].object_size / size_step;
-      large_object_layouts[prev_index].layoutMax = classes.size();
+      size_t prev_index = classes[clsIndex - 1].object_size / size_step;
+      large_object_layouts[prev_index].layoutMax = cls.layoutID;
       for (size_t i = prev_index + 1; i < LayoutRangeSizeCount; i++) {
          auto& bin = large_object_layouts[i];
-         bin.layoutMin = classes.size();
-         bin.layoutMax = classes.size();
+         bin.layoutMin = cls.layoutID;
+         bin.layoutMax = cls.layoutID;
       }
-      tObjectClass obj;
-      obj.object_size = cst::ArenaSize;
-      classes.push_back(obj);
    }
 
    for (int i = 0; i < LayoutRangeSizeCount; i++) {
       if (medium_object_layouts[i].layoutMin > 0) {
-         _ASSERT(medium_object_layouts[i].layoutMax - medium_object_layouts[i].layoutMin < 2);
+         auto sizeMin = layouts[medium_object_layouts[i].layoutMin]->object_size;
+         auto sizeMax = layouts[medium_object_layouts[i].layoutMax]->object_size;
+         _ASSERT(sizeMax >= sizeMin);
       }
       if (large_object_layouts[i].layoutMin > 0) {
-         _ASSERT(large_object_layouts[i].layoutMax - large_object_layouts[i].layoutMin < 2);
+         auto sizeMin = layouts[large_object_layouts[i].layoutMin]->object_size;
+         auto sizeMax = layouts[large_object_layouts[i].layoutMax]->object_size;
+         _ASSERT(sizeMax >= sizeMin);
       }
    }
 
@@ -286,20 +329,14 @@ void ins::generate_objects_layout_config(std::string path) {
       else if (size < MediumSizeLimit) {
          const size_t size_step = MediumSizeLimit / LayoutRangeSizeCount;
          auto& bin = medium_object_layouts[size / size_step];
-         for (auto layout = bin.layoutMin; layout <= bin.layoutMax; layout++) {
-            if (size <= ObjectLayoutSize[layout]) return layout;
-         }
-         _ASSERT(0);
-         return 0;
+         if (size <= layouts[bin.layoutMin]->object_size) return bin.layoutMin;
+         else return bin.layoutMax;
       }
       else if (size < LargeSizeLimit) {
          const size_t size_step = LargeSizeLimit / LayoutRangeSizeCount;
          auto& bin = large_object_layouts[size / size_step];
-         for (auto layout = bin.layoutMin; layout <= bin.layoutMax; layout++) {
-            if (size <= ObjectLayoutSize[layout]) return layout;
-         }
-         _ASSERT(0);
-         return 0;
+         if (size <= layouts[bin.layoutMin]->object_size) return bin.layoutMin;
+         else return bin.layoutMax;
       }
       else {
          return ObjectLayoutCount - 1;
@@ -312,11 +349,12 @@ void ins::generate_objects_layout_config(std::string path) {
          _ASSERT(0);
       }
       else if (layout > 1) {
-         if (ObjectLayoutSize[layout] < sz) {
+         auto cls = layouts[layout];
+         if (cls[0].object_size < sz) {
             printf("! too small at: %lld\n", sz);
             _ASSERT(0);
          }
-         else if (ObjectLayoutSize[layout - 1] >= sz) {
+         else if (cls[-1].object_size >= sz) {
             printf("! too large at: %lld\n", sz);
             _ASSERT(0);
          }
@@ -327,6 +365,13 @@ void ins::generate_objects_layout_config(std::string path) {
       std::ofstream out(path + "/include/ins/memory/objects-config.h");
       out << "#include <ins/memory/objects.h>\n\n";
       out << "namespace ins {\n";
+      out << "\n";
+      out << "const size_t SlabbedObjectLayoutMin  = " << 0 << ";\n";
+      out << "const size_t SlabbedObjectLayoutMax = " << (SlabbedObjectPolicy_count - 1) << ";\n";
+      out << "const size_t LargeObjectLayoutMin  = " << SlabbedObjectPolicy_count << ";\n";
+      out << "const size_t LargeObjectLayoutMax = " << (LargeObjectPolicy_count - 1) << ";\n";
+      out << "const size_t UncachedLargeObjectLayoutMin = " << LargeObjectPolicy_count << ";\n";
+      out << "const size_t UncachedLargeObjectLayoutMax = " << LargeObjectPolicy_count << ";\n";
       out << "\n";
       out << "const size_t ObjectLayoutCount = " << classes.size() << ";\n";
       out << "\n";
@@ -343,23 +388,39 @@ void ins::generate_objects_layout_config(std::string path) {
       out.close();
    }
    {
+      char tmp[128];
+
       std::ofstream out(path + "/src/memory/objects-config.cpp");
       out << "#include <ins/memory/objects.h>\n\n";
-      out << "const ins::tObjectLayoutInfos ins::ObjectLayoutInfos[ins::ObjectLayoutCount] = {\n";
-      for (auto& cls : classes) {
+
+      out << "const ins::tObjectLayoutBase ins::ObjectLayoutBase[ins::ObjectLayoutCount] = {\n";
+      for (int i = 0; i < layouts.size(); i++) {
+         auto& cls = *layouts[i];
          out << "{";
          out << "/*object_base*/" << cls.buffer_start << ", ";
-         out << "/*object_divider*/" << 0 << ", ";
+         out << "/*object_divider*/" << cls.object_divider << ", ";
          out << "/*object_size*/" << cls.object_size << ", ";
-         out << "/*object_count*/" << cls.object_count << ", ";
-         out << "/*slab_count*/" << cls.slab_count << ", ";
-         out << "/*region_sizeL2*/" << cls.region_sizeL2 << ", ";
-         out << "/*policy*/" << cls.getPolicyName() << ", ";
+         out << "/*region_mask*/ 0x" << itoa(cls.region_mask, tmp, 16) << ", ";
          out << "},\n";
       }
       out << "};\n\n";
 
-      char tmp[64];
+      out << "const ins::tObjectLayoutInfos ins::ObjectLayoutInfos[ins::ObjectLayoutCount] = {\n";
+      for (int i = 0; i < layouts.size(); i++) {
+         auto& cls = *layouts[i];
+         out << "{";
+         out << "/*object_base*/" << cls.buffer_start << ", ";
+         out << "/*object_divider*/" << cls.object_divider << ", ";
+         out << "/*object_size*/" << cls.object_size << ", ";
+         out << "/*object_count*/" << cls.object_count << ", ";
+         out << "/*slab_count*/" << cls.slab_count << ", ";
+         out << "/*region_sizeL2*/" << cls.region_sizeL2 << ", ";
+         out << "/*region_mask*/ 0x" << itoa(cls.region_mask, tmp, 16) << ", ";
+         out << "/*policy*/" << cls.getLayoutPolicyName() << ", ";
+         out << "},\n";
+      }
+      out << "};\n\n";
+
       out << "const uint8_t ins::small_object_layouts[ins::LayoutRangeSizeCount+1] = {";
       for (size_t i = 0; i <= LayoutRangeSizeCount; i++) {
          if ((i % 32) == 0) out << "\n";
@@ -385,4 +446,8 @@ void ins::generate_objects_layout_config(std::string path) {
 
       out.close();
    }
+}
+
+int main() {
+   generate_objects_layout_config("C:/git/project/insmalloc/lib/ins.memory.space");
 }

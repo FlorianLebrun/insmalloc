@@ -3,12 +3,14 @@
 
 namespace ins {
 
+   typedef struct sSlabbedObjectRegion* SlabbedObjectRegion;
+
    /**********************************************************************
    *
    *   Object Region Buckets
    *
    ***********************************************************************/
-   struct ObjectRegionBucket {
+   struct SlabbedObjectRegionBucket {
       struct Shared;
 
       struct Private {
@@ -28,14 +30,14 @@ namespace ins {
          bool IsEmpty() {
             return this->count == 0;
          }
-         bool PushObject(ObjectHeader obj, ObjectRegion owner) {
+         bool PushObject(ObjectHeader obj, SlabbedObjectRegion owner) {
             auto cobj = ObjectChain(obj);
             cobj->next = this->first;
             if (cobj->next) this->last = this->first;
             this->first = uintptr_t(obj) - uintptr_t(owner);
             return this->count++ == 0;
          }
-         ObjectHeader PopObject(ObjectRegion owner) {
+         ObjectHeader PopObject(SlabbedObjectRegion owner) {
             if (this->first) {
                auto cobj = ObjectChain(this->first + uintptr_t(owner));
                this->first = cobj->next;
@@ -44,7 +46,7 @@ namespace ins {
             }
             return 0;
          }
-         void DumpInto(Private& receiver, ObjectRegion owner) {
+         void DumpInto(Private& receiver, SlabbedObjectRegion owner) {
             if (this->count) {
                if (receiver.first) {
                   auto rlast = ObjectChain(receiver.last + uintptr_t(owner));
@@ -93,7 +95,7 @@ namespace ins {
          bool IsEmpty() {
             return this->items.load(std::memory_order_relaxed) == 0;
          }
-         bool PushObject(ObjectHeader obj, ObjectRegion owner) {
+         bool PushObject(ObjectHeader obj, SlabbedObjectRegion owner) {
             auto cobj = ObjectChain(obj);
             for (;;) {
                ChainEntry cur(this->items.load(std::memory_order_relaxed));
@@ -115,7 +117,7 @@ namespace ins {
                }
             }
          }
-         void DumpInto(Private& receiver, ObjectRegion owner) {
+         void DumpInto(Private& receiver, SlabbedObjectRegion owner) {
             ChainEntry items = this->items.exchange(0, std::memory_order_seq_cst);
             if (items.bits) {
                auto cfirst = ObjectChain(items.first + uintptr_t(owner));
@@ -146,28 +148,32 @@ namespace ins {
    *   Object Region structure
    *
    ***********************************************************************/
-   struct sObjectRegion : sRegion {
+   typedef struct sSlabbedObjectRegion : sObjectRegion {
 
       struct tListLinks {
-         sObjectRegion* used = none();
-         std::atomic<sObjectRegion*> notified = none();
+         sSlabbedObjectRegion* used = none<sSlabbedObjectRegion>();
+         std::atomic<sSlabbedObjectRegion*> notified = none<sSlabbedObjectRegion>();
       };
 
       uint8_t layout = 0;
-      const tObjectLayoutInfos& infos;
-      IObjectRegionOwner* owner = 0;
       tListLinks next;
 
-      ObjectRegionBucket::Private objects_bin;
-      ObjectRegionBucket::Shared shared_bin;
-      ObjectRegionBucket::Slab slab_bin;
+      SlabbedObjectRegionBucket::Private objects_bin;
+      SlabbedObjectRegionBucket::Shared shared_bin;
+      SlabbedObjectRegionBucket::Slab slab_bin;
 
+      void DisplayToConsole() override;
+      
       bool IsDisposable() {
          return this->GetAvailablesCount() == infos.object_count;
       }
 
       size_t GetAvailablesCount() {
          return this->objects_bin.length() + this->slab_bin.length() + this->shared_bin.length();
+      }
+
+      DescriptorType GetType() override {
+         return DescriptorType::Region;
       }
 
       size_t GetSize() override {
@@ -246,9 +252,7 @@ namespace ins {
       }
 
       void DisposeSlabObject(ObjectHeader obj) {
-         auto mask = (uintptr_t(1) << infos.region_sizeL2) - 1;
-         auto offset = uintptr_t(obj) - uintptr_t(this) - infos.object_base;
-         auto index = getBlockOffsetToIndex(infos.object_divider, offset, mask);
+         auto index = this->infos.GetObjectIndex(uintptr_t(obj));
 
          auto& slab = this->GetSlab(index >> cst::ObjectPerSlabL2);
          slab.availables |= uint32_t(1) << (index & cst::ObjectSlabMask);
@@ -261,17 +265,13 @@ namespace ins {
          }
       }
 
-      static sObjectRegion* New(uint8_t layout);
-
-      static constexpr sObjectRegion* none() {
-         return (sObjectRegion*)-1;
-      }
+      static sSlabbedObjectRegion* New(uint8_t layout);
 
    protected:
-      friend class sDescriptorHeap;
+      friend struct Descriptor;
 
-      sObjectRegion(uint8_t layout)
-         : layout(layout), infos(ObjectLayoutInfos[layout])
+      sSlabbedObjectRegion(uint8_t layout)
+         : layout(layout), sObjectRegion(ObjectLayoutInfos[layout])
       {
          auto& infos = ObjectLayoutInfos[layout];
          auto lastIndex = infos.slab_count - 1;
@@ -296,97 +296,42 @@ namespace ins {
       sObjectSlab& GetSlab(size_t i) {
          return ObjectSlab(&ObjectBytes(this)[cst::ObjectRegionHeadSize])[i];
       }
-   };
-   static_assert(sizeof(sObjectRegion) <= cst::ObjectRegionHeadSize, "bad size");
-
-   /**********************************************************************
-   *
-   *   Object Region List
-   *
-   ***********************************************************************/
-   struct ObjectRegionList {
-      ObjectRegion first = 0;
-      ObjectRegion last = 0;
-      uint32_t count = 0;
-
-      void PushRegion(ObjectRegion region) {
-         region->next.used = 0;
-         if (!this->last) this->first = region;
-         else this->last->next.used = region;
-         this->last = region;
-         this->count++;
-      }
-      ObjectRegion PopRegion() {
-         if (auto region = this->first) {
-            this->first = region->next.used;
-            if (!this->first) this->last = 0;
-            this->count--;
-            region->next.used = sObjectRegion::none();
-            return region;
-         }
-         return 0;
-      }
-      void DumpInto(ObjectRegionList& receiver, IObjectRegionOwner* owner) {
-         if (this->first) {
-            for (ObjectRegion region = this->first; region; region = region->next.used) {
-               region->owner = owner;
-            }
-            if (receiver.last) {
-               receiver.last->next.used = this->first;
-               receiver.last = this->last;
-               receiver.count += this->count;
-            }
-            else {
-               receiver.first = this->first;
-               receiver.last = this->last;
-               receiver.count = this->count;
-            }
-            this->first = 0;
-            this->last = 0;
-            this->count = 0;
-         }
-      }
-      void CheckValidity() {
-         uint32_t c_count = 0;
-         for (auto x = this->first; x && c_count < 1000000; x = x->next.used) {
-            if (!x->next.used) _ASSERT(x == this->last);
-            c_count++;
-         }
-         _ASSERT(c_count == this->count);
-      }
-   };
+   } *SlabbedObjectRegion;
+   static_assert(sizeof(sSlabbedObjectRegion) <= cst::ObjectRegionHeadSize, "bad size");
 
    /**********************************************************************
    *
    *   Object Region Pool
    *
    ***********************************************************************/
-   struct ObjectRegionPool {
+   struct SlabbedRegionPool {
    public:
+      typedef ObjectRegionList<sSlabbedObjectRegion> SlabbedRegionList;
+
       // Owned regions counter
       uint32_t owneds_count = 0;
 
       // Used regions
-      ObjectRegionList usables;
-      ObjectRegionList disposables; // Empties region
+      SlabbedRegionList usables;
+      SlabbedRegionList disposables; // Empties region
 
       // Notified as usables region
-      std::atomic<ObjectRegion> notifieds = 0;
+      std::atomic<SlabbedObjectRegion> notifieds = 0;
 
-      void AddNewRegion(ObjectRegion region) {
+      void AddNewRegion(SlabbedObjectRegion region) {
          _INS_DEBUG(printf("AddNewRegion\n"));
          this->usables.PushRegion(region);
          this->owneds_count++;
       }
 
-      void PushDisposableRegion(ObjectRegion region) {
+      void PushDisposableRegion(SlabbedObjectRegion region) {
          _INS_DEBUG(printf("PushDisposableRegion\n"));
          _ASSERT(region->IsDisposable());
          this->disposables.PushRegion(region);
       }
 
-      void PushUsableRegion(ObjectRegion region) {
-         if (region->next.used == sObjectRegion::none()) {
+      void PushUsableRegion(SlabbedObjectRegion region) {
+         if (region->next.used == none<sSlabbedObjectRegion>()) {
             if (usables.count > 1 && region->IsDisposable()) {
                this->PushDisposableRegion(region);
             }
@@ -400,9 +345,9 @@ namespace ins {
          }
       }
 
-      void PushNotifiedRegion(ObjectRegion region) {
+      void PushNotifiedRegion(SlabbedObjectRegion region) {
          _INS_DEBUG(printf("PushNotifiedRegion\n"));
-         _ASSERT(region->next.notified == sObjectRegion::none());
+         _ASSERT(region->next.notified == none<sSlabbedObjectRegion>());
          for (;;) {
             auto cur = this->notifieds.load(std::memory_order_relaxed);
             region->next.notified.store(cur, std::memory_order_relaxed);
@@ -448,7 +393,7 @@ namespace ins {
          return count;
       }
 
-      void DumpInto(ObjectRegionPool& receiver, IObjectRegionOwner* owner) {
+      void DumpInto(SlabbedRegionPool& receiver, IObjectRegionOwner* owner) {
          this->ScavengeNotifiedRegions();
          uint32_t transfered_count = this->usables.count + this->disposables.count;
          receiver.owneds_count += transfered_count;
@@ -461,8 +406,8 @@ namespace ins {
          this->ScavengeNotifiedRegions();
 
          // Purge disposables from usables list
-         ObjectRegion* pregion = &this->usables.first;
-         ObjectRegion last = 0;
+         SlabbedObjectRegion* pregion = &this->usables.first;
+         SlabbedObjectRegion last = 0;
          while (*pregion) {
             auto region = *pregion;
             if (region->IsDisposable()) {
@@ -498,10 +443,10 @@ namespace ins {
       }
       bool ScavengeNotifiedRegions() {
          uint32_t collecteds = 0;
-         ObjectRegion region = this->notifieds.exchange(0);
+         SlabbedObjectRegion region = this->notifieds.exchange(0);
          while (region) {
             auto next_region = region->next.notified.load();
-            region->next.notified = sObjectRegion::none();
+            region->next.notified = none<sSlabbedObjectRegion>();
             if (!region->shared_bin.IsEmpty()) {
                region->shared_bin.DumpInto(region->objects_bin, region);
             }
@@ -514,4 +459,115 @@ namespace ins {
          return collecteds > 0;
       }
    };
+
+   /**********************************************************************
+   *
+   *   Slabbed Object Provider
+   *
+   ***********************************************************************/
+   struct SlabbedObjectProvider : public IObjectRegionOwner {
+      uint8_t layout = 0;
+      SlabbedRegionPool regions_pool;
+      void NotifyAvailableRegion(sObjectRegion* region) override final {
+         this->regions_pool.PushNotifiedRegion(SlabbedObjectRegion(region));
+      }
+   };
+
+   /**********************************************************************
+   *
+   *   Slabbed Object Heap
+   *   (multithreaded memory context/heap of an object class)
+   *
+   ***********************************************************************/
+   struct SlabbedObjectHeap : SlabbedObjectProvider {
+      ObjectBucket shared_objects_cache;
+      std::mutex lock;
+
+      void Initiate(uint8_t layout);
+      void Clean();
+
+      bool AcquireObjectBatch(ObjectBucket& bucket);
+      bool DischargeObjectBucket(ObjectBucket& bucket);
+      void DisposeObjectBucket(ObjectBucket& bucket);
+
+      void CheckValidity();
+   };
+
+   /**********************************************************************
+   *
+   *   Slabbed Object Context
+   *   (monothreaded memory context of an object class)
+   *
+   ***********************************************************************/
+   struct SlabbedObjectContext : public SlabbedObjectProvider {
+      SlabbedObjectHeap* heap = 0;
+      ObjectBucket shared_objects_cache;
+
+      void Initiate(SlabbedObjectHeap* heap);
+      void Clean();
+      void CheckValidity();
+
+      ObjectHeader AllocatePrivateObject();
+      ObjectHeader AllocateSharedObject();
+      void FreeObject(ObjectHeader obj, SlabbedObjectRegion region);
+   };
+
+   inline ObjectHeader SlabbedObjectContext::AllocatePrivateObject() {
+
+      // Try alloc in regions pool
+      if (auto obj = this->regions_pool.AcquireObject()) {
+         obj->used = 1;
+         return obj;
+      }
+
+      // Acquire and alloc in a new region
+      if (auto region = sSlabbedObjectRegion::New(layout)) {
+         region->owner = this;
+         this->regions_pool.AddNewRegion(region);
+         if (auto obj = this->regions_pool.AcquireObject()) {
+            obj->used = 1;
+            return obj;
+         }
+      }
+
+      return 0;
+   }
+
+   inline ObjectHeader SlabbedObjectContext::AllocateSharedObject() {
+      do {
+
+         // Try alloc in context objects bucket
+         if (auto obj = this->shared_objects_cache.PopObject()) {
+            obj->used = 1;
+            return obj;
+         }
+
+         // Fill a object cache from heap and retry
+      } while (this->heap->AcquireObjectBatch(this->shared_objects_cache));
+
+      return 0;
+   }
+
+   inline void SlabbedObjectContext::FreeObject(ObjectHeader obj, SlabbedObjectRegion region) {
+      _ASSERT(region->layout == this->layout);
+      _INS_PROTECT_CONDITION(obj->used == 1);
+      obj->used = 0;
+      if (region->owner == this) {
+         if (region->objects_bin.PushObject(obj, region)) {
+            this->regions_pool.PushUsableRegion(region);
+         }
+      }
+      else if (region->owner == this->heap) {
+         this->shared_objects_cache.PushObject(obj);
+         if (this->shared_objects_cache.batch_count > 2) {
+            this->heap->DischargeObjectBucket(this->shared_objects_cache);
+         }
+      }
+      else if (region->owner) {
+         region->DisposeExchangedObject(obj);
+      }
+      else {
+         printf("Cannot free object in not owned region\n");
+      }
+   }
 }

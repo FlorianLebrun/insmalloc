@@ -2,8 +2,8 @@
 #include <mimalloc.h>
 #include <ins/binary/alignment.h>
 #include <ins/memory/space.h>
-#include <ins/memory/context.h>
-#include <ins/memory/gc.h>
+#include <ins/memory/heap.h>
+#include <ins/memory/space.h>
 #include <ins/hooks.h>
 #include "./utils.h"
 
@@ -12,14 +12,15 @@ struct no_malloc_handler {
       return "no-malloc";
    }
    __forceinline  static void* malloc(size_t) {
-      __nop();
-      return (void*)-1;
+      static char bytes[2048];
+      ins::__nop();
+      return bytes;
    }
    static void free(void*) {
-      __nop();
+      ins::__nop();
    }
    static bool check(void* p) {
-      return true;
+     return true;
    }
 };
 
@@ -57,20 +58,21 @@ struct ins_malloc_handler {
    static ins::MemoryContext* context;
    static void init() {
       if (!context) {
-         context = new ins::MemoryContext(new ins::MemorySpace());
+         context = ins_get_heap().AcquireContext();
       }
    }
    static const char* name() {
       return "ins-malloc";
    }
    static void* malloc(size_t s) {
-      return context->allocateBlock(s);
+      return context->AllocateBuffer(s);
    }
    static void free(void* p) {
-      return context->disposeBlock(uintptr_t(p));
+      return context->FreeBuffer(uintptr_t(p));
    }
    static bool check(void* p) {
-      ins::BlockLocation block(context->space, uintptr_t(p));
-      return block.descriptor || block.index;
+      //ins::ObjectLocation loc(uintptr_t(p));
+      //return loc.object != 0;
+      return true;
    }
 };

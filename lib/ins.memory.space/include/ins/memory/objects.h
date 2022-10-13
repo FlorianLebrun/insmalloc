@@ -7,11 +7,12 @@
 
 namespace ins {
 
-   typedef struct sObjectRegion* ObjectRegion;
    typedef struct sObjectSlab* ObjectSlab;
    typedef struct sObjectHeader* ObjectHeader;
-   typedef char* ObjectBytes;
-   struct ObjectClassHeap;
+   typedef struct sObjectRegion* ObjectRegion;
+   typedef uint8_t* ObjectBytes;
+
+   struct IObjectRegionOwner;
 
    namespace cst {
       const size_t ObjectPerSlabL2 = 5;
@@ -24,13 +25,25 @@ namespace ins {
    }
 
    enum ObjectLayoutPolicy {
-      SmallSlabPolicy, // slab size is less than a page
-      MediumSlabPolicy, // slab size is greater than a page
-      LargeSlabPolicy, // object size is less than a page
-      HugeSlabPolicy, // object size is greater than a page
+      SlabbedObjectPolicy, // region with multiple objects
+      LargeObjectPolicy, // region with one object
+      UncachedLargeObjectPolicy, // region with one object and no management policy
    };
 
-   // Object size fixed point divider: index = (uint64_t(position)*ObjectDividerFixed32[clsID]) >> 32
+   // Object size fixed point divider: index = (uint64_t(position)*ObjectDividerFixed32[clsID]) >> 32 
+   struct tObjectLayoutBase {
+      uint32_t object_base;
+      uint32_t object_divider;
+      uint32_t object_size;
+      uint32_t region_mask;
+      uintptr_t GetObjectIndex(uintptr_t offset) const {
+         return ((offset - object_base) * object_divider) >> 16;
+      }
+      uintptr_t GetObjectOffset(uintptr_t index) const {
+         return object_base + index * object_size;
+      }
+   };
+
    struct tObjectLayoutInfos {
       uint32_t object_base;
       uint32_t object_divider;
@@ -38,12 +51,19 @@ namespace ins {
       uint16_t object_count;
       uint8_t slab_count;
       uint8_t region_sizeL2;
+      uint32_t region_position_mask;
       ObjectLayoutPolicy policy;
+      uintptr_t GetObjectIndex(uintptr_t offset) const {
+         return ((offset - object_base) * object_divider) >> 16;
+      }
+      uintptr_t GetObjectOffset(uintptr_t index) const {
+         return object_base + index * object_size;
+      }
    };
 
    extern const size_t ObjectLayoutCount;
    extern const tObjectLayoutInfos ObjectLayoutInfos[];
-   extern const uint32_t ObjectLayoutDividerFixed32[];
+   extern const tObjectLayoutBase ObjectLayoutBase[];
 
    /**********************************************************************
    *
@@ -57,9 +77,10 @@ namespace ins {
       union {
          struct {
             // Not thread protected bits (changed only on alloc/free, ie. when only one thread point to it)
-            uint8_t used : 1; // when 0 object is in reserve, not really allocated
-            uint8_t hasAnaliticsTrace : 1; // define that object is followed by analytics structure
-            uint8_t hasSecurityPadding : 1; // define that object is followed by a padding of security(canary)
+            uint32_t used : 1; // when 0 object is in reserve, not really allocated
+            uint32_t hasAnalyticsInfos : 1; // define that object is followed by analytics structure
+            uint32_t hasSecurityPadding : 1; // define that object is followed by a padding of security(canary)
+            uint32_t schemaID : 24;
 
             // Thread protected bits
             uint32_t retentionCounter : 8; // define how many times the object shall be dispose to be really deleted
@@ -125,12 +146,81 @@ namespace ins {
 
    /**********************************************************************
    *
-   *   Functions
+   *   Object Region
    *
    ***********************************************************************/
+   struct sObjectRegion : Descriptor {
+      IObjectRegionOwner* owner = 0;
+      const tObjectLayoutInfos& infos;
+      sObjectRegion(const tObjectLayoutInfos& infos) : infos(infos) {}
+      virtual void DisplayToConsole() = 0;
+   };
+
+   // Object Region Owner interface
    struct IObjectRegionOwner {
       virtual void NotifyAvailableRegion(sObjectRegion* region) = 0;
    };
+
+   // Object Region List
+   template <typename sObjectRegion>
+   struct ObjectRegionList {
+      typedef sObjectRegion* ObjectRegion;
+      ObjectRegion first = 0;
+      ObjectRegion last = 0;
+      uint32_t count = 0;
+
+      void PushRegion(ObjectRegion region) {
+         region->next.used = 0;
+         if (!this->last) this->first = region;
+         else this->last->next.used = region;
+         this->last = region;
+         this->count++;
+      }
+      ObjectRegion PopRegion() {
+         if (auto region = this->first) {
+            this->first = region->next.used;
+            if (!this->first) this->last = 0;
+            this->count--;
+            region->next.used = none<sSlabbedObjectRegion>();
+            return region;
+         }
+         return 0;
+      }
+      void DumpInto(ObjectRegionList& receiver, IObjectRegionOwner* owner) {
+         if (this->first) {
+            for (ObjectRegion region = this->first; region; region = region->next.used) {
+               region->owner = owner;
+            }
+            if (receiver.last) {
+               receiver.last->next.used = this->first;
+               receiver.last = this->last;
+               receiver.count += this->count;
+            }
+            else {
+               receiver.first = this->first;
+               receiver.last = this->last;
+               receiver.count = this->count;
+            }
+            this->first = 0;
+            this->last = 0;
+            this->count = 0;
+         }
+      }
+      void CheckValidity() {
+         uint32_t c_count = 0;
+         for (auto x = this->first; x && c_count < 1000000; x = x->next.used) {
+            if (!x->next.used) _ASSERT(x == this->last);
+            c_count++;
+         }
+         _ASSERT(c_count == this->count);
+      }
+   };
+
+   /**********************************************************************
+   *
+   *   Functions
+   *
+   ***********************************************************************/
 
    inline uint16_t getBlockDivider(uintptr_t block_size) {
       return ((uint64_t(1) << 16) + block_size - 1) / block_size;
@@ -138,14 +228,6 @@ namespace ins {
 
    inline uintptr_t applyBlockDivider(uint16_t divider, uintptr_t value) {
       return (uint64_t(value) * uint64_t(divider)) >> 16;
-   }
-
-   inline uintptr_t getBlockIndexToOffset(uintptr_t block_size, uintptr_t block_index, uintptr_t region_mask) {
-      return (region_mask - block_size + 1) - block_index * block_size;
-   }
-
-   inline uintptr_t getBlockOffsetToIndex(uintptr_t block_divider, uintptr_t block_offset, uintptr_t region_mask) {
-      return (uint64_t((region_mask - block_offset) & region_mask) * block_divider) >> 32;
    }
 
    inline uint8_t getLayoutForSize(size_t size) {
@@ -157,17 +239,15 @@ namespace ins {
       else if (size < MediumSizeLimit) {
          const size_t size_step = MediumSizeLimit / LayoutRangeSizeCount;
          auto& bin = medium_object_layouts[size / size_step];
-         for (auto layout = bin.layoutMin; layout <= bin.layoutMax; layout++) {
-            if (size <= ObjectLayoutInfos[layout].object_size) return layout;
-         }
+         if (size <= ObjectLayoutInfos[bin.layoutMin].object_size) return bin.layoutMin;
+         else return bin.layoutMax;
          _ASSERT(0);
       }
       else if (size < LargeSizeLimit) {
          const size_t size_step = LargeSizeLimit / LayoutRangeSizeCount;
          auto& bin = large_object_layouts[size / size_step];
-         for (auto layout = bin.layoutMin; layout <= bin.layoutMax; layout++) {
-            if (size <= ObjectLayoutInfos[layout].object_size) return layout;
-         }
+         if (size <= ObjectLayoutInfos[bin.layoutMin].object_size) return bin.layoutMin;
+         else return bin.layoutMax;
          _ASSERT(0);
       }
       return ObjectLayoutCount - 1;
