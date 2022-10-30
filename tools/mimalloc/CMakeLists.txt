@@ -1,19 +1,19 @@
 
 set(mi_sources
-    src/stats.c
-    src/random.c
-    src/os.c
-    src/bitmap.c
-    src/arena.c
-    src/region.c
-    src/segment.c
-    src/page.c
-    src/alloc.c
-    src/alloc-aligned.c
-    src/alloc-posix.c
-    src/heap.c
-    src/options.c
-    src/init.c)
+    src/stats.cpp
+    src/random.cpp
+    src/os.cpp
+    src/bitmap.cpp
+    src/arena.cpp
+    src/region.cpp
+    src/segment.cpp
+    src/page.cpp
+    src/alloc.cpp
+    src/alloc-aligned.cpp
+    src/alloc-posix.cpp
+    src/heap.cpp
+    src/options.cpp
+    src/init.cpp)
 
 add_library(mimalloc-static STATIC ${mi_sources})
 set_target_properties(mimalloc-static PROPERTIES FOLDER "Tools")

@@ -265,10 +265,10 @@ namespace ins {
 #endif
 
    static inline uint32_t lmask_32(int nbit) {
-      return (uint32_t(1) << nbit) - 1;
+      return (nbit < 32 ? uint32_t(1) << nbit : 0) - 1;
    }
    static inline uint64_t lmask_64(int nbit) {
-      return (uint64_t(1) << nbit) - 1;
+      return (nbit < 64 ? uint64_t(1) << nbit : 0) - 1;
    }
 
    static inline uint32_t umask_32(int nbit) {
@@ -288,5 +288,24 @@ namespace ins {
       if (value & lmask_64(n)) n++;
       return n;
    }
-
+   static inline int bitcount_32(uint32_t x) {
+      const uint32_t m1 = 0x55555555;
+      const uint32_t m2 = 0x33333333;
+      const uint32_t m4 = 0x0f0f0f0f;
+      const uint32_t h01 = 0x01010101;
+      x -= (x >> 1) & m1;
+      x = (x & m2) + ((x >> 2) & m2);
+      x = (x + (x >> 4)) & m4;
+      return (x * h01) >> 24;
+   }
+   static inline int bitcount_64(uint64_t x) {
+      const uint64_t m1 = 0x5555555555555555;
+      const uint64_t m2 = 0x3333333333333333;
+      const uint64_t m4 = 0x0f0f0f0f0f0f0f0f;
+      const uint64_t h01 = 0x0101010101010101;
+      x -= (x >> 1) & m1;
+      x = (x & m2) + ((x >> 2) & m2);
+      x = (x + (x >> 4)) & m4;
+      return (x * h01) >> 56;
+   }
 }

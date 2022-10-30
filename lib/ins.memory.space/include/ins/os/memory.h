@@ -4,12 +4,14 @@
 
 namespace ins {
    namespace OSMemory {
+
       enum tState {
          FREE,
          RESERVED,
          COMMITTED,
          OUT_OF_MEMORY,
       };
+
       struct tZoneState {
          tState state;
          uintptr_t address;
@@ -20,9 +22,6 @@ namespace ins {
       uintptr_t GetSlabSize();
       tZoneState GetMemoryZoneState(uintptr_t address);
       void EnumerateMemoryZone(uintptr_t startAddress, uintptr_t endAddress, std::function<void(tZoneState&)> visitor);
-
-
-      uintptr_t AllocBuffer(uintptr_t base, uintptr_t limit, uintptr_t size, uintptr_t alignement);
 
       uintptr_t ReserveMemory(uintptr_t base, uintptr_t limit, uintptr_t size, uintptr_t alignement);
       bool CommitMemory(uintptr_t base, uintptr_t size);

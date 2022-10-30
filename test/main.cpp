@@ -1,42 +1,34 @@
 #include <ins/memory/space.h>
-#include <ins/memory/heap.h>
+#include <ins/memory/file-view.h>
+#include <ins/memory/schemas.h>
+#include <ins/memory/contexts.h>
+#include <ins/memory/objects-refs.h>
+#include <ins/memory/controller.h>
+#include <ins/timing.h>
 #include <stdio.h>
 #include <vector>
+#include <unordered_map>
+
 #include "./test_perf_alloc.h"
 
 using namespace ins;
 
-ins::MemoryContext* ins_malloc_handler::context = 0;
-
-namespace SlabbedPolicy {
+namespace DescriptorsTests {
    void test_descriptor_region() {
 
       struct TestExtDesc : Descriptor {
-         size_t commited;
-         size_t size;
-
-         TestExtDesc(size_t commited, size_t size) : size(size), commited(commited) {
+         TestExtDesc() {
+            size_t commited = this->GetUsedSize();
+            size_t size = this->GetSize();
             for (int i = sizeof(*this); i < commited; i++) ((char*)this)[i] = 0;
             this->Resize(size);
             for (int i = sizeof(*this); i < size; i++) ((char*)this)[i] = 0;
          }
-         virtual size_t GetSize() {
-            return this->size;
-         }
-         virtual void SetUsedSize(size_t commited) {
-            this->commited = commited;
-         }
-         virtual size_t GetUsedSize() {
-            return this->commited;
-         }
       };
       auto desc = Descriptor::NewExtensible<TestExtDesc>(1000000);
-      desc->Dispose();
+      delete desc;
 
       struct TestDesc : Descriptor {
-         virtual size_t GetSize() {
-            return sizeof(*this);
-         }
       };
 
       std::vector<Descriptor*> descs;
@@ -45,14 +37,16 @@ namespace SlabbedPolicy {
          descs.push_back(desc);
       }
       for (auto desc : descs) {
-         desc->Dispose();
+         delete desc;
       }
    }
+}
 
-   void apply_cross_context_private_alloc(SlabbedObjectContext& contextAlloc, SlabbedObjectContext& contextDispose) {
+namespace ObjectsTests {
+   /*void apply_cross_context_private_alloc(LocalObjectClassPool& contextAlloc, LocalObjectClassPool& contextDispose) {
       {
-         auto obj = contextAlloc.AllocatePrivateObject();
-         contextDispose.FreeObject(obj, SlabbedObjectRegion(MemorySpace::GetRegionDescriptor(obj)));
+         ObjectLocation obj = contextAlloc.AllocatePrivateObject();
+         contextDispose.FreeObject(obj);
          contextAlloc.CheckValidity();
       }
       {
@@ -71,8 +65,8 @@ namespace SlabbedPolicy {
             contextAlloc.CheckValidity();
             for (int i = 0; i < count; i++) {
                //printf("! dispose %d\n", i);
-               auto obj = objects[i];
-               contextDispose.FreeObject(obj, SlabbedObjectRegion(MemorySpace::GetRegionDescriptor(obj)));
+               ObjectLocation obj = objects[i];
+               contextDispose.FreeObject(obj);
             }
             _INS_DEBUG(MemorySpace::Print());
             contextAlloc.CheckValidity();
@@ -82,10 +76,10 @@ namespace SlabbedPolicy {
    }
 
 
-   void apply_cross_context_shared_alloc(SlabbedObjectContext& contextAlloc, SlabbedObjectContext& contextDispose) {
+   void apply_cross_context_shared_alloc(LocalObjectClassPool& contextAlloc, LocalObjectClassPool& contextDispose) {
       {
-         auto obj = contextAlloc.AllocateSharedObject();
-         contextDispose.FreeObject(obj, SlabbedObjectRegion(MemorySpace::GetRegionDescriptor(obj)));
+         ObjectLocation obj = contextAlloc.AllocateSharedObject();
+         contextDispose.FreeObject(obj);
          contextAlloc.CheckValidity();
       }
       {
@@ -104,8 +98,8 @@ namespace SlabbedPolicy {
             contextAlloc.CheckValidity();
             for (int i = 0; i < count; i++) {
                //printf("! dispose %d\n", i);
-               auto obj = objects[i];
-               contextDispose.FreeObject(obj, SlabbedObjectRegion(MemorySpace::GetRegionDescriptor(obj)));
+               ObjectLocation obj = objects[i];
+               contextDispose.FreeObject(obj);
             }
             _INS_DEBUG(MemorySpace::Print());
             contextAlloc.CheckValidity();
@@ -115,85 +109,250 @@ namespace SlabbedPolicy {
       {
          size_t count = 2000000;
          for (int i = 0; i < count; i++) {
-            auto obj = contextAlloc.AllocateSharedObject();
-            contextDispose.FreeObject(obj, SlabbedObjectRegion(MemorySpace::GetRegionDescriptor(obj)));
+            ObjectLocation obj = contextAlloc.AllocateSharedObject();
+            contextDispose.FreeObject(obj);
          }
          _INS_DEBUG(MemorySpace::Print());
          contextAlloc.CheckValidity();
       }
    }
 
-   void test_private_object(MemoryHeap& heap) {
-      auto contextA = heap.AcquireContext();
-      auto contextB = heap.AcquireContext();
+   void test_private_object(MemoryCentralContext& heap) {
+      ins::ThreadDedicatedContext contextA(heap.AcquireContext(), true);
+      ins::ThreadDedicatedContext contextB(heap.AcquireContext(), true);
       int classId = 4;
 
-      SlabbedObjectHeap& heapObj = heap.objects_slabbed[classId];
-      SlabbedObjectContext& contextObjA = contextA->objects_slabbed[classId];
-      SlabbedObjectContext& contextObjB = contextB->objects_slabbed[classId];
+      CentralObjectClassPool& heapObj = heap.objects_unmanaged[classId];
+      LocalObjectClassPool& contextObjA = contextA->objects_unmanaged[classId];
+      LocalObjectClassPool& contextObjB = contextB->objects_unmanaged[classId];
 
       apply_cross_context_private_alloc(contextObjA, contextObjA);
       apply_cross_context_private_alloc(contextObjA, contextObjB);
 
-      heap.DisposeContext(contextA);
-      heap.DisposeContext(contextB);
    }
 
-   void test_shared_object(MemoryHeap& heap) {
-      auto contextA = heap.AcquireContext();
-      auto contextB = heap.AcquireContext();
+   void test_shared_object(MemoryCentralContext& heap) {
+      ins::ThreadDedicatedContext contextA(heap.AcquireContext(), true);
+      ins::ThreadDedicatedContext contextB(heap.AcquireContext(), true);
       int classId = 4;
 
-      SlabbedObjectHeap& heapObj = heap.objects_slabbed[classId];
-      SlabbedObjectContext& contextObjA = contextA->objects_slabbed[classId];
-      SlabbedObjectContext& contextObjB = contextB->objects_slabbed[classId];
+      CentralObjectClassPool& heapObj = heap.objects_unmanaged[classId];
+      LocalObjectClassPool& contextObjA = contextA->objects_unmanaged[classId];
+      LocalObjectClassPool& contextObjB = contextB->objects_unmanaged[classId];
 
       apply_cross_context_shared_alloc(contextObjA, contextObjA);
       apply_cross_context_shared_alloc(contextObjA, contextObjB);
 
-      heap.DisposeContext(contextA);
-      heap.DisposeContext(contextB);
-   }
+   }*/
 
 }
 
-int main() {
-   MemoryHeap& heap = ins_get_heap();
-   //ins::generate_objects_layout_config("C:/git/project/insmalloc/lib/ins.memory.space");
-
-   ins_malloc(64000);
-
-   if (1) {
-      heap.SetTimeStampOption(true);
-      heap.SetStackStampOption(true);
-      heap.SetSecurityPaddingOption(60);
+namespace FileViewTests {
+   void test_direct_1() {
+      size_t fsize = 100000000;
+      auto fv = ins::DirectFileView::NewReadWrite("./ee.tmp", fsize, true);
+      auto buf = fv->MapBuffer(0, 1000);
+      auto bytes = fv->GetBase().as<char>();
+      for (size_t s = 16; s <= fsize; s += 4096) {
+         bool r = fv->ExtendSize(s);
+         for (size_t i = 16; i < s - 4; i += 4096 * (rand() % 32)) {
+            ((int*)&bytes[i])[0] = rand();
+         }
+         _ASSERT(r);
+      }
+      ins::RegionsHeap.Print();
+      delete fv;
    }
-   extern void test_schemas();
-   test_schemas();
+}
 
-   {
+namespace ManagedObjectsTests {
+
+   struct MyClass : ManagedClass<MyClass> {
+      ins::CRef<MyClass> parent;
+      ins::CRef<MyClass> next;
+      //std::string name = "hello";
+      static void __traverser__(ins::TraversalContext<SchemaDesc, MyClass>& context) {
+         context.visit_ref(offsetof(MyClass, parent));
+         context.visit_ref(offsetof(MyClass, next));
+         context.visit_ref(offsetof(MyClass, parent));
+         context.visit_ref(offsetof(MyClass, next));
+         context.visit_ref(offsetof(MyClass, parent));
+         context.visit_ref(offsetof(MyClass, next));
+      }
+   };
+   void apply_alloc_gc() {
+      ins::ThreadDedicatedContext context;
+      ins::CLocal<MyClass> x = new MyClass();
+      ins::Controller.central.PerformMemoryCleanup();
+
+      x->next = new MyClass();
+      x->next = new MyClass();
+      x->next = new MyClass();
+      x->next = new MyClass();
+      x->next = new MyClass();
+      x->next->next = x;
+
+      if (1) {
+         ins::timing::Chrono chrono;
+         MyClass* cur = x.get();
+         for (int i = 0; i < 10000000; i++) {
+            MyClass* c = new MyClass();
+            c->parent = cur;
+            cur->next = c;
+            cur = c;
+         }
+         printf("> allocation time: %g s\n", chrono.GetDiffFloat(chrono.S));
+      }
+
+      Controller.central.PerformMemoryCleanup();
+
+      x.release();
+
+      Controller.central.PerformMemoryCleanup();
+
+      //MemorySpace::Print();
+   }
+}
+
+ins::ManagedSchema ins::ManagedClass<ManagedObjectsTests::MyClass>::schema;
+
+int main() {
+   //DescriptorsTests::test_descriptor_region();
+   if (0) {
+
+      void* p;
+      p = ins_malloc(6400000);
+      ins_free(p);
+      p = ins_malloc(64000);
+      ins_free(p);
+   }
+   if (0) {
+      ins::Controller.SetTimeStampOption(true);
+      ins::Controller.SetStackStampOption(true);
+      ins::Controller.SetSecurityPaddingOption(60);
+   }
+   if (0) {
+      ManagedObjectsTests::apply_alloc_gc();
+      return 0;
+   }
+   if (0) {
       ins::ObjectAnalyticsInfos meta;
-      ins_malloc(50);
-      ins_malloc(50);
+      auto a = ins_malloc(50);
+      auto b = ins_malloc(50);
       auto p = ins_malloc(50);
       auto p_sz = ins_msize(p);
       if (ins_get_metadata(p, meta)) {
          printf("");
       }
       ins_free(p);
-      MemorySpace::Print();
+      ins::RegionsHeap.Print();
+
+      ins_free(a);
+      ins_free(b);
+   }
+   if (0) {
+      printf("------------ Monothread --------------\n");
+      ins::ThreadDedicatedContext context;
+      test_perf_alloc();
+   }
+   if (1) {
+      printf("------------ Cross-context --------------\n");
+      ins::RegionsHeap.maxUsablePhysicalBytes = size_t(1) << 31;
+      size_t limit = ins::RegionsHeap.maxUsablePhysicalBytes * 0.50;
+      size_t szblk = cst::ObjectLayoutBase[4].object_multiplier;
+      size_t count = limit / szblk;
+
+      void** p = new void* [count];
+      {
+         ins::ThreadDedicatedContext context;
+         for (size_t i = 0; i < count; i++) {
+            p[i] = ins_malloc(szblk);
+         }
+         context.Pop();
+         ins::Controller.Print();
+      }
+      {
+         ins::ThreadDedicatedContext context;
+         for (size_t i = 0; i < count; i++) {
+            ins_free(p[i]);
+            p[i] = ins_malloc(szblk);
+         }
+         ins::Controller.Print();
+         for (size_t i = 0; i < count; i++) {
+            ins_free(p[i]);
+         }
+         delete p;
+         ins::Controller.Print();
+      }
+   }
+   if (0) {
+      printf("------------ Multithread --------------\n");
+      std::thread t1(
+         []() {
+            ins::ThreadDedicatedContext context;
+            test_perf_alloc();
+         }
+      );
+      std::thread t2(
+         []() {
+            ins::ThreadDedicatedContext context;
+            test_perf_alloc();
+         }
+      );
+      std::thread t3(
+         []() {
+            ins::ThreadDedicatedContext context;
+            test_perf_alloc();
+         }
+      );
+      std::thread t4(
+         []() {
+            ins::ThreadDedicatedContext context;
+            test_perf_alloc();
+         }
+      );
+      t1.join();
+      t2.join();
+      t3.join();
+      t4.join();
+   }
+   if (0) {
+      printf("------------ Sequential overflow --------------\n");
+      ins::RegionsHeap.maxUsablePhysicalBytes = size_t(1) << 30;
+      size_t limit = ins::RegionsHeap.maxUsablePhysicalBytes * 0.8;
+      size_t szblk = cst::ObjectLayoutBase[4].object_multiplier;
+      size_t count = limit / szblk;
+      std::thread t1(
+         [&]() {
+            ins::ThreadDedicatedContext context;
+            void** p = new void* [count];
+            for (size_t i = 0; i < count; i++) {
+               p[i] = ins_malloc(szblk);
+            }
+            for (size_t i = 0; i < count; i++) {
+               ins_free(p[i]);
+            }
+            delete p;
+            context.Pop();
+         }
+      );
+      t1.join();
+      std::thread t2(
+         [&]() {
+            ins::ThreadDedicatedContext context;
+            for (size_t sz = 0; sz < limit; sz += szblk) {
+               ins_malloc(szblk);
+            }
+         }
+      );
+      t2.join();
+      ins::Controller.Print();
+   }
+   {
+      ins::Controller.PerformMemoryCleanup();
+      ins::Controller.Print();
    }
 
-   test_perf_alloc();
-   return 0;
-
-   SlabbedPolicy::test_private_object(heap);
-   SlabbedPolicy::test_shared_object(heap);
-   //test_descriptor_region();
-
-   heap.Clean();
-   heap.CheckValidity();
-   MemorySpace::Print();
    return 0;
 }
 

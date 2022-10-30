@@ -2,7 +2,7 @@
 #include <mimalloc.h>
 #include <ins/binary/alignment.h>
 #include <ins/memory/space.h>
-#include <ins/memory/heap.h>
+#include <ins/memory/contexts.h>
 #include <ins/memory/space.h>
 #include <ins/hooks.h>
 #include "./utils.h"
@@ -55,20 +55,14 @@ struct mi_malloc_handler {
 };
 
 struct ins_malloc_handler {
-   static ins::MemoryContext* context;
-   static void init() {
-      if (!context) {
-         context = ins_get_heap().AcquireContext();
-      }
-   }
    static const char* name() {
       return "ins-malloc";
    }
    static void* malloc(size_t s) {
-      return context->AllocateBuffer(s);
+      return ins_malloc(s);
    }
    static void free(void* p) {
-      return context->FreeBuffer(uintptr_t(p));
+      return ins_free(p);
    }
    static bool check(void* p) {
       //ins::ObjectLocation loc(uintptr_t(p));

@@ -1,5 +1,6 @@
 #include <ins/binary/alignment.h>
-#include <ins/memory/os-memory.h>
+#include <ins/os/memory.h>
+#include <ins/os/threading.h>
 
 #include <windows.h>
 #include <psapi.h>
@@ -69,7 +70,7 @@ namespace ins {
                   return ptr;
                }
                else if (ptr > base) {
-                  base = alignX<intptr_t>(ptr, alignement);
+                  base = ins::align<intptr_t>(ptr, alignement);
                }
                VirtualFree(LPVOID(ptr), size, MEM_RELEASE);
                printf("! unsuseful reservation detected !\n");
@@ -79,10 +80,6 @@ namespace ins {
             base += alignement;
          }
          return 0;
-      }
-
-      uintptr_t AllocBuffer(uintptr_t base, uintptr_t limit, uintptr_t size, uintptr_t alignement) {
-         return AcquireMemory(base, limit, size, alignement, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
       }
 
       uintptr_t ReserveMemory(uintptr_t base, uintptr_t limit, uintptr_t size, uintptr_t alignement) {
@@ -103,5 +100,54 @@ namespace ins {
          return VirtualFree(LPVOID(base), 0, MEM_RELEASE);
       }
 
+   }
+   namespace OS {
+      Thread::Thread() {
+         this->d0 = 0;
+         this->d1 = 0;
+      }
+      Thread::Thread(Thread&& x) {
+         this->d0 = x.d0;
+         this->d1 = x.d1;
+         x.d0 = 0;
+         x.d1 = 0;
+      }
+      void Thread::operator = (Thread&& x) {
+         this->d0 = x.d0;
+         this->d1 = x.d1;
+         x.d0 = 0;
+         x.d1 = 0;
+      }
+      Thread::~Thread() {
+         this->Clear();
+      }
+      uint64_t Thread::GetID() {
+         return this->d0;
+      }
+      bool Thread::IsCurrent() {
+         return this->d0 == ::GetCurrentThreadId();
+      }
+      void Thread::Suspend() {
+         ::SuspendThread(HANDLE(this->d1));
+      }
+      void Thread::Resume() {
+         ::ResumeThread(HANDLE(this->d1));
+      }
+      Thread::operator bool() {
+         return this->d1 != 0;
+      }
+      void Thread::Clear() {
+         if (this->d1) {
+            CloseHandle(HANDLE(this->d1));
+            this->d0 = 0;
+            this->d1 = 0;
+         }
+      }
+      Thread Thread::current() {
+         Thread t;
+         t.d0 = uint64_t(::GetCurrentThreadId());
+         t.d1 = uint64_t(OpenThread(THREAD_ALL_ACCESS, false, ::GetCurrentThreadId()));
+         return t;
+      }
    }
 }

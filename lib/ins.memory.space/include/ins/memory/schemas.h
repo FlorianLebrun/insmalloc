@@ -1,5 +1,6 @@
 #pragma once
-#include <ins/memory/space.h>
+#include <ins/memory/regions.h>
+#include <ins/memory/objects-base.h>
 
 namespace ins {
 
@@ -9,13 +10,16 @@ namespace ins {
 
    template<typename tSchema = SchemaDesc, typename tData = void>
    struct TraversalContext {
-      typedef void (*fRefVisitor)(TraversalContext& self, uint32_t offset);
+      typedef void (*fVisitPtr)(TraversalContext* self, void* ptr);
       tSchema* schema;
       tData* data;
-      fRefVisitor visit_ref;
+      fVisitPtr visit_ptr;
+      void visit_ref(uint32_t offset) {
+         this->visit_ptr(this, (void*&)ObjectBytes(this->data)[offset]);
+      }
    };
 
-   typedef void (*ObjectTraverser)(TraversalContext<>& context);
+   typedef void (*ObjectTraverser)(TraversalContext<>* context);
 
    struct ISchemaInfos {
       virtual const char* name() = 0;
@@ -36,9 +40,9 @@ namespace ins {
       uint32_t refs_count;
       static void __traverser__(TraversalContext<SchemaFieldMap>& context) {
          auto schema = context.schema;
-         auto refs = (Ref*)&ObjectBytes(schema)[sizeof(SchemaFieldMap)];
+         auto refs = (Ref*)&BufferBytes(schema)[sizeof(SchemaFieldMap)];
          for (int i = 0; schema->refs_count; i++) {
-            context.visit_ref(context, refs[i].offset);
+            context.visit_ref(refs[i].offset);
          }
       }
    };
@@ -46,15 +50,16 @@ namespace ins {
    struct SchemasHeap {
 
       struct SchemaArena : ArenaDescriptor {
-         SchemaArena() : ArenaDescriptor(0, cst::ArenaSizeL2) {
+         SchemaArena() : ArenaDescriptor(cst::ArenaSizeL2) {
             this->availables_count--;
             _ASSERT(this->availables_count == 0);
          }
       };
 
-      std::mutex lock;
+      uintptr_t arenaBase;
       SchemaArena arena;
 
+      std::mutex lock;
       uintptr_t alloc_region_size;
       uintptr_t alloc_cursor;
       uintptr_t alloc_commited;
@@ -62,11 +67,30 @@ namespace ins {
 
       SchemasHeap();
       SchemaDesc* CreateSchema(ISchemaInfos* infos, uint32_t base_size, ObjectTraverser traverser);
-      SchemaFieldMap* CreateFieldMapSchema(uint32_t refs_count);
-      void DeleteSchema(SchemaDesc* desc);
 
-      SchemaID GetSchemaID(SchemaDesc* schema) { return (uintptr_t(schema) - this->arena.base) / sizeof(SchemaDesc); }
-      SchemaDesc* GetSchemaDesc(SchemaID id) { return (SchemaDesc*)((uintptr_t(id) * sizeof(SchemaDesc)) + this->arena.base); }
+      SchemaID GetSchemaID(SchemaDesc* schema) { return (uintptr_t(schema) - this->arenaBase) / sizeof(SchemaDesc); }
+      SchemaDesc* GetSchemaDesc(SchemaID id) { return (SchemaDesc*)((uintptr_t(id) * sizeof(SchemaDesc)) + this->arenaBase); }
+   };
+
+   struct ManagedSchema : ISchemaInfos {
+      SchemaID id = 0;
+      const char* type_name = 0;
+      const char* name() override { return this->type_name; }
+      void load(const std::type_info& info, size_t size, ObjectTraverser traverser);
+      size_t size();
+   };
+
+   template<typename T>
+   struct ManagedClass {
+      static ManagedSchema schema;
+      void* operator new(size_t size) {
+         if (schema.id == 0) schema.load(typeid(T), sizeof(T), ObjectTraverser(T::__traverser__));
+         _ASSERT(schema.size() == size);
+         return ins_new_managed(schema.id)->ptr();
+      }
+      void operator delete(void* ptr) {
+         ins_free(ptr);
+      }
    };
 
    extern SchemasHeap schemasHeap;

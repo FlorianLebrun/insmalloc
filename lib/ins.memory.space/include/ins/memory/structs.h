@@ -1,13 +1,16 @@
 #pragma once
 #include <atomic>
 #include <exception>
+#include <functional>
 #include <ins/macros.h>
 #include <ins/binary/bitwise.h>
+#include <stdio.h>
 
 namespace ins {
 
    typedef size_t index_t;
    typedef void* ptr_t;
+   typedef uint8_t* BufferBytes;
 
    //-------------------------------------------------------
    // Memory space constants
@@ -36,6 +39,7 @@ namespace ins {
       const size_t RegionSizeMin = size_t(1) << RegionSizeMinL2;
       const size_t RegionSizeMaxL2 = ArenaSizeL2;
       const size_t RegionSizeMax = size_t(1) << RegionSizeMaxL2;
+      const size_t RegionSizingCount = 33;
 
       const size_t PagePerArenaL2 = ArenaSizeL2 - PageSizeL2;
       const size_t ArenaPerSpaceL2 = SpaceSizeL2 - ArenaSizeL2;
@@ -61,8 +65,10 @@ namespace ins {
       address_t() : ptr(0) {}
       address_t(uintptr_t ptr) : ptr(ptr) {}
       address_t(void* ptr) : ptr(uintptr_t(ptr)) {}
+      address_t(uint32_t arenaID, uint32_t position) : arenaID(arenaID), position(position) {}
       operator uintptr_t() { return ptr; }
       operator void* () { return (void*)ptr; }
+      void operator = (uintptr_t ptr) { this->ptr = ptr; }
       template<typename T>
       T* as() { return (T*)ptr; }
    };
@@ -129,6 +135,13 @@ namespace ins {
       }
    };
 
+   struct sz2a {
+      sz2a(size_t size);
+      void set(size_t size, size_t factor, const char* unit);
+      operator char* () { return this->chars; }
+      const char* c_str() { return this->chars; }
+      char chars[32];
+   };
 
    struct exception_missing_memory : std::exception {
 

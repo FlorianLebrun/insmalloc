@@ -3,7 +3,7 @@
 #define _INS_PROTECTION 1
 
 #if _DEBUG
-#define _USE_INS_DEBUG 1
+#define _USE_INS_DEBUG 0
 #else
 #define _USE_INS_DEBUG 0
 #endif
@@ -22,5 +22,5 @@
 #if _INS_PROTECTION
 #define _INS_PROTECT_CONDITION(x) _ASSERT(x)
 #else
-#define _INS_PROTECT_CONDITION(x)
+#define _INS_PROTECT_CONDITION(x) if (!x) throw;
 #endif
