@@ -3,6 +3,7 @@
 #include <ins/memory/controller.h>
 
 using namespace ins;
+using namespace ins::mem;
 
 void sObjectRegion::NotifyAvailables(bool managed) {
    if (this->owner) {
@@ -15,10 +16,10 @@ void sObjectRegion::NotifyAvailables(bool managed) {
    }
    else {
       if (managed) {
-         ins::Controller.central.managed.objects[this->layoutID].notifieds.Push(this);
+         mem::Controller.central.managed.objects[this->layoutID].notifieds.Push(this);
       }
       else {
-         ins::Controller.central.unmanaged.objects[this->layoutID].notifieds.Push(this);
+         mem::Controller.central.unmanaged.objects[this->layoutID].notifieds.Push(this);
       }
    }
 }
@@ -193,7 +194,7 @@ __declspec(noinline) ObjectHeader ObjectLocalContext::AcquirePrivatedObject(uint
       if (auto region = pool.active_region) {
          _ASSERT(region->layoutID == layoutID);
          // Get an object index
-         auto index = lsb_64(region->availables);
+         auto index = bit::lsb_64(region->availables);
 
          // Prepare new object
          auto offset = cst::ObjectLayoutBase[layoutID].GetObjectOffset(index);
@@ -247,7 +248,7 @@ __declspec(noinline) ObjectHeader ObjectLocalContext::AcquireSharedObject(uint8_
       if (auto region = pool.active_region) {
 
          // Get an object index
-         auto index = lsb_64(region->availables);
+         auto index = bit::lsb_64(region->availables);
 
          // Prepare new object
          auto offset = cst::ObjectLayoutBase[layoutID].GetObjectOffset(index);

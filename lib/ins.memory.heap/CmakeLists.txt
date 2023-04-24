@@ -1,0 +1,10 @@
+set(target "ins.memory.heap")
+
+append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" ROOT "./src" DIRECTORIES "./" "./binary" "./memory" "./os")
+append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" ROOT "./include/ins" DIRECTORIES "./" "./binary" "./memory" "./os")
+
+add_library(${target} STATIC ${files})
+
+target_include_directories(${target} PUBLIC "./include")
+
+target_link_libraries(${target} PUBLIC ins.memory.space)

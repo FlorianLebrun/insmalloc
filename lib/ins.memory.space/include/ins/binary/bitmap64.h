@@ -5,7 +5,7 @@
 #include "./alignment.h"
 #include "./bitwise.h"
 
-namespace ins {
+namespace ins::bit {
 
    enum class AcquireMode {
       FirstFit,

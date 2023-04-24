@@ -2,7 +2,7 @@
 #include <ins/memory/regions.h>
 #include <ins/memory/objects-base.h>
 
-namespace ins {
+namespace ins::mem {
 
    struct SchemaDesc;
    struct ISchemaInfos;
@@ -47,10 +47,11 @@ namespace ins {
       }
    };
 
-   struct SchemasHeap {
+   struct SchemasHeap : RegionsSpaceInitiator {
 
       struct SchemaArena : ArenaDescriptor {
-         SchemaArena() : ArenaDescriptor(cst::ArenaSizeL2) {
+         SchemaArena() {
+            this->Initiate(cst::ArenaSizeL2);
             this->availables_count--;
             _ASSERT(this->availables_count == 0);
          }

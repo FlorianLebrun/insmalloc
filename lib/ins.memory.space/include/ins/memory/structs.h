@@ -6,7 +6,7 @@
 #include <ins/binary/bitwise.h>
 #include <stdio.h>
 
-namespace ins {
+namespace ins::mem {
 
    typedef size_t index_t;
    typedef void* ptr_t;
@@ -44,8 +44,6 @@ namespace ins {
       const size_t PagePerArenaL2 = ArenaSizeL2 - PageSizeL2;
       const size_t ArenaPerSpaceL2 = SpaceSizeL2 - ArenaSizeL2;
       const size_t ArenaPerSpace = size_t(1) << ArenaPerSpaceL2;
-
-      const size_t PackingCount = 4;
    }
 
    //-------------------------------------------------------
@@ -75,66 +73,6 @@ namespace ins {
    static_assert(sizeof(address_t) == 8, "bad size");
 #pragma pack(pop)
 
-   //-------------------------------------------------------
-   // Memory size representation
-   //-------------------------------------------------------
-
-   // Compact size def
-   union sizeid_t {
-      uint8_t bits;
-      struct {
-         uint8_t packing : 3; // in { 1, 3, 5, 7 }
-         uint8_t shift : 5;
-      };
-      sizeid_t(uint8_t packing = 0, uint8_t shift = 0)
-         : packing(packing), shift(shift) {
-      }
-      size_t size() {
-         return size_t(packing) << shift;
-      }
-   };
-
-   // Normal size def
-   struct size_target_t {
-      uint16_t packing;
-      uint16_t shift;
-      size_target_t(size_t size) {
-         size_t exp, base;
-         if (size > 8) {
-            exp = size_t(msb_32(size)) - 2;
-            base = size >> exp;
-         }
-         else {
-            exp = 0;
-            if (!(base = size)) return;
-         }
-         if (size != (base << exp)) base++;
-         while ((base & 1) == 0) { exp++; base >>= 1; }
-         this->packing = base;
-         this->shift = exp;
-         _ASSERT(size > this->lower() && size <= this->value());
-      }
-      size_t value() {
-         return size_t(this->packing) << this->shift;
-      }
-      size_t lower() {
-         if (this->shift > 3) {
-            if (this->packing > 1) return (this->packing - size_t(1)) << this->shift;
-            else return size_t(7) << (this->shift - 3);
-         }
-         else return 0;
-      }
-      index_t divide(index_t divided) {
-         return divided / this->value();
-      }
-      index_t multiply(index_t value) {
-         return (value << this->shift) * this->packing;
-      }
-      sizeid_t id() {
-         return sizeid_t(packing, shift);
-      }
-   };
-
    struct sz2a {
       sz2a(size_t size);
       void set(size_t size, size_t factor, const char* unit);
@@ -144,7 +82,7 @@ namespace ins {
    };
 
    struct exception_missing_memory : std::exception {
-
+      // memory starving
    };
 
    template<typename T>

@@ -1,7 +1,7 @@
 #pragma once
 #include <ins/memory/objects-base.h>
 
-namespace ins {
+namespace ins::mem {
 
    struct ObjectCentralContext;
    struct ObjectLocalContext;
@@ -46,8 +46,8 @@ namespace ins {
 
       bool managed = false;
       std::uint64_t objects_notifieds_warnings;
-      CentralObjects objects[ins::cst::ObjectLayoutCount];
-      ObjectRegionCache regions[ins::cst::ObjectRegionTemplateCount];
+      CentralObjects objects[cst::ObjectLayoutCount];
+      ObjectRegionCache regions[cst::ObjectRegionTemplateCount];
 
       void Initiate(bool managed);
       void CheckValidity();
@@ -80,11 +80,11 @@ namespace ins {
       MemoryContext* context = 0;
       ObjectCentralContext* heap = 0;
 
-      LocalObjects privateds[ins::cst::ObjectLayoutCount];
-      LocalObjects shareds[ins::cst::ObjectLayoutCount];
-      ObjectRegionList disposables[ins::cst::ObjectLayoutCount]; // Region with no used objects
+      LocalObjects privateds[cst::ObjectLayoutCount];
+      LocalObjects shareds[cst::ObjectLayoutCount];
+      ObjectRegionList disposables[cst::ObjectLayoutCount]; // Region with no used objects
 
-      ObjectRegionCache regions[ins::cst::ObjectRegionTemplateCount];
+      ObjectRegionCache regions[cst::ObjectRegionTemplateCount];
 
       void Initiate(MemoryContext* context, ObjectCentralContext* central);
       void Clean();

@@ -10,6 +10,8 @@
 #include <mutex>
 #include "./HookFunctionManifold.h"
 
+using namespace ins::mem;
+
 std::atomic<intptr_t> _windows_loader_working;
 
 // These are hard-coded, unfortunately. :-( They are also probably
@@ -340,7 +342,7 @@ namespace {
    HookFunction::Context<FreeLibrary_hook> FreeLibrary_hook::context("FreeLibrary", &::FreeLibrary);
 }
 
-namespace ins {
+namespace ins::mem {
 
    void PatchMemoryFunctions() {
 

@@ -2,10 +2,11 @@
 #include <ins/memory/descriptors.h>
 #include <ins/memory/structs.h>
 #include <ins/memory/regions.h>
+#include <ins/memory/config.h>
 #include <stdint.h>
 #include <stdlib.h>
 
-namespace ins {
+namespace ins::mem {
 
    typedef struct sObjectHeader* ObjectHeader;
    typedef struct sObjectRegion* ObjectRegion;
@@ -147,18 +148,18 @@ namespace ins {
 
       size_t GetAvailablesCount() {
          auto bits = this->availables | this->notified_availables.load(std::memory_order_relaxed);
-         return ins::bitcount_64(bits);
+         return bit::bitcount_64(bits);
       }
 
       size_t GetUsedCount() {
          auto bits = this->availables | this->notified_availables.load(std::memory_order_relaxed);
          bits ^= cst::ObjectLayoutMask[this->layoutID];
-         return ins::bitcount_64(bits);
+         return bit::bitcount_64(bits);
       }
 
       size_t GetNotifiedCount() {
          auto bits = this->notified_availables.load(std::memory_order_relaxed);
-         return ins::bitcount_64(bits);
+         return bit::bitcount_64(bits);
       }
 
       size_t GetObjectSize() {
@@ -166,8 +167,8 @@ namespace ins {
       }
 
       size_t GetRegionSize() {
-         auto regionID = ins::RegionsHeap.arenas[address_t(this).arenaID].segmentation;
-         return size_t(this->width) << ins::cst::RegionSizingInfos[regionID].granularityL2;
+         auto regionID = mem::Regions.ArenaMap[address_t(this).arenaID].segmentation;
+         return size_t(this->width) << mem::cst::RegionSizingInfos[regionID].granularityL2;
       }
 
       ObjectHeader GetObjectAt(int index) {
@@ -179,7 +180,7 @@ namespace ins {
          if (this->availables) {
 
             // Get an object index
-            auto index = lsb_64(this->availables);
+            auto index = bit::lsb_64(this->availables);
 
             // Prepare new object
             auto offset = cst::ObjectRegionHeadSize + index * cst::ObjectLayoutBase[this->layoutID].object_multiplier;
@@ -206,8 +207,8 @@ namespace ins {
          : layoutID(layoutID), owner(owner) {
 
          auto& infos = cst::ObjectLayoutInfos[layoutID];
-         this->width = size >> ins::cst::RegionSizingInfos[infos.region_sizeL2].granularityL2;
-         this->availables = ins::cst::ObjectLayoutMask[layoutID];
+         this->width = size >> mem::cst::RegionSizingInfos[infos.region_sizeL2].granularityL2;
+         this->availables = mem::cst::ObjectLayoutMask[layoutID];
          _INS_DEBUG(printf("! new region: %p: object_size=%zu object_count=%d\n", this, infos.object_size, infos.object_count));
 
       }
@@ -383,11 +384,11 @@ namespace ins {
       RegionLayoutID layout;
       uint32_t index;
       ObjectLocation(address_t address) {
-         this->arena = ins::RegionsHeap.arenas[address.arenaID];
+         this->arena = mem::Regions.ArenaMap[address.arenaID];
          this->layout = this->arena.layout(address.position >> this->arena.segmentation);
          if (this->layout.IsObjectRegion()) {
-            auto& infos = ins::cst::ObjectLayoutBase[this->layout];
-            auto offset = address.position & ins::cst::RegionMasks[this->arena.segmentation];
+            auto& infos = mem::cst::ObjectLayoutBase[this->layout];
+            auto offset = address.position & mem::cst::RegionMasks[this->arena.segmentation];
             this->index = infos.GetObjectIndex(offset);
             this->region = ObjectRegion(address.ptr - offset);
             this->object = ObjectHeader(uintptr_t(region) + infos.GetObjectOffset(this->index));

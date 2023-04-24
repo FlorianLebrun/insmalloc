@@ -1,6 +1,9 @@
 #include <ins/memory/file-view.h>
 #include <ins/memory/regions.h>
 
+using namespace ins;
+using namespace ins::mem;
+
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 namespace {
@@ -78,7 +81,7 @@ namespace {
    }
 }
 
-struct Win32DirectFileView : ins::DirectFileView {
+struct Win32DirectFileView : mem::DirectFileView {
    size_t view_size;
    size_t page_size;
    HANDLE hSection;
@@ -87,7 +90,7 @@ struct Win32DirectFileView : ins::DirectFileView {
 
       // Check if section extension shall be done
       if (new_size <= this->size) return true;
-      new_size = ins::align(new_size, this->page_size);
+      new_size = bit::align(new_size, this->page_size);
       if (new_size > this->view_size)  return false;
       std::lock_guard<std::mutex> guard(lock);
       if (new_size <= this->size) return true;
@@ -115,19 +118,19 @@ struct Win32DirectFileView : ins::DirectFileView {
 
 using namespace ins;
 
-address_t ins::DirectFileView::GetBase() {
+address_t mem::DirectFileView::GetBase() {
    return this->base;
 }
 
-size_t ins::DirectFileView::GetSize() {
+size_t mem::DirectFileView::GetSize() {
    return this->size;
 }
 
-FileBuffer ins::DirectFileView::MapBuffer(uint32_t offset, size_t size) {
+FileBuffer mem::DirectFileView::MapBuffer(uint32_t offset, size_t size) {
    return FileBuffer(this->base + offset);
 }
 
-ins::DirectFileView* ins::DirectFileView::NewReadOnly(const char* filename) {
+mem::DirectFileView* mem::DirectFileView::NewReadOnly(const char* filename) {
    __init_section_API();
    HANDLE hFile = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, OPEN_EXISTING, 0, 0);
    if (hFile != INVALID_HANDLE_VALUE) {
@@ -138,7 +141,7 @@ ins::DirectFileView* ins::DirectFileView::NewReadOnly(const char* filename) {
       ULARGE_INTEGER FileSize;
       FileSize.LowPart = GetFileSize(hFile, &FileSize.HighPart);
       size_t view_size = info.dwPageSize;
-      if (view_size < FileSize.QuadPart) view_size = align(FileSize.QuadPart, info.dwPageSize);
+      if (view_size < FileSize.QuadPart) view_size = bit::align(FileSize.QuadPart, info.dwPageSize);
 
       // Create mapped section with fixed view size
       if (HANDLE hSection = CreateFileMapping(hFile, 0, PAGE_READONLY | SEC_RESERVE, 0, view_size, NULL)) {
@@ -164,7 +167,7 @@ ins::DirectFileView* ins::DirectFileView::NewReadOnly(const char* filename) {
    return 0;
 }
 
-ins::DirectFileView* ins::DirectFileView::NewReadWrite(const char* filename, size_t size, bool reset) {
+mem::DirectFileView* mem::DirectFileView::NewReadWrite(const char* filename, size_t size, bool reset) {
    __init_section_API();
    HANDLE hFile = CreateFileA(filename, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, 0, reset ? CREATE_ALWAYS : OPEN_ALWAYS, 0, 0);
    if (hFile != INVALID_HANDLE_VALUE) {
@@ -172,13 +175,13 @@ ins::DirectFileView* ins::DirectFileView::NewReadWrite(const char* filename, siz
       GetSystemInfo(&info);
 
       // Adjust used size to file granularity
-      size_t view_size = align(int64_t(size), info.dwPageSize);
+      size_t view_size = bit::align(int64_t(size), info.dwPageSize);
 
       // Adjust used size to file size
       ULARGE_INTEGER FileSize;
       FileSize.LowPart = GetFileSize(hFile, &FileSize.HighPart);
       size_t used_size = info.dwPageSize;
-      if (used_size < FileSize.QuadPart) used_size = align(FileSize.QuadPart, info.dwPageSize);
+      if (used_size < FileSize.QuadPart) used_size = bit::align(FileSize.QuadPart, info.dwPageSize);
 
       // Create section with only 1 page in the file
       HANDLE hSection = 0;

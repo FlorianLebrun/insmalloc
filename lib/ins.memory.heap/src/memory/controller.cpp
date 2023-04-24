@@ -6,24 +6,25 @@
 #include <condition_variable>
 
 using namespace ins;
+using namespace ins::mem;
 
-ins::MemoryController ins::Controller;
+mem::MemoryController mem::Controller;
 
-namespace ins {
+namespace ins::mem {
    void __notify_memory_item_init__(uint32_t flag);
 }
 
-ins::MemoryController::MemoryController() {
-   if (this == &ins::Controller) {
-      ins::__notify_memory_item_init__(2);
+mem::MemoryController::MemoryController() {
+   if (this == &mem::Controller) {
+      mem::__notify_memory_item_init__(2);
    }
    else {
       this->Initiate();
    }
 }
 
-void ins::MemoryController::Initiate() {
-   this->defaultContext = ins::Controller.CreateSharedContext();
+void mem::MemoryController::Initiate() {
+   this->defaultContext = mem::Controller.CreateSharedContext();
    this->worker = std::thread(
       [this]() {
          while (!this->terminating) {
@@ -63,7 +64,7 @@ void ins::MemoryController::Initiate() {
    );
 }
 
-ins::MemoryController::~MemoryController() {
+mem::MemoryController::~MemoryController() {
 
    this->terminating = true;
    this->notification_signal.notify_all();
@@ -81,20 +82,20 @@ ins::MemoryController::~MemoryController() {
    }
    this->central.PerformMemoryCleanup();
 
-   if (this == &ins::Controller) {
-      ins::RegionsHeap.PerformMemoryCleanup();
+   if (this == &mem::Controller) {
+      mem::Regions.PerformMemoryCleanup();
    }
 }
 
-void ins::MemoryController::PerformMemoryCleanup() {
-   ins::timing::Chrono chrono;
+void mem::MemoryController::PerformMemoryCleanup() {
+   timing::Chrono chrono;
 
    // Purge allocation caches
    for (auto context = this->contexts; context; context = context->next.registered) {
       context->PerformMemoryCleanup();
    }
    this->central.PerformMemoryCleanup();
-   ins::RegionsHeap.PerformMemoryCleanup();
+   mem::Regions.PerformMemoryCleanup();
 
    // Sweep unused objects
    this->MarkAndSweepUnusedObjects();
@@ -102,7 +103,7 @@ void ins::MemoryController::PerformMemoryCleanup() {
    printf("> cleanup time: %g ms\n", chrono.GetDiffFloat(chrono.MS));
 }
 
-void ins::MemoryController::MarkAndSweepUnusedObjects() {
+void mem::MemoryController::MarkAndSweepUnusedObjects() {
    if (ObjectAnalysisSession::running.try_lock()) {
       _ASSERT(!ObjectAnalysisSession::enabled);
       this->cycle++;
@@ -117,7 +118,7 @@ void ins::MemoryController::MarkAndSweepUnusedObjects() {
    }
 }
 
-void ins::MemoryController::MarkUsedObjects() {
+void mem::MemoryController::MarkUsedObjects() {
    this->cleanup.Reset();
    ObjectAnalysisSession::enabled = &this->cleanup;
    {
@@ -130,10 +131,10 @@ void ins::MemoryController::MarkUsedObjects() {
    ObjectAnalysisSession::enabled = 0;
 }
 
-void ins::MemoryController::SweepUnusedObjects() {
+void mem::MemoryController::SweepUnusedObjects() {
    size_t sweptObjects = 0;
    for (size_t i = 0; i < cst::ArenaPerSpace; i++) {
-      auto& entry = ins::RegionsHeap.arenas[i];
+      auto& entry = mem::Regions.ArenaMap[i];
       if (entry.managed) {
          auto arena = entry.descriptor();
          address_t base = i << cst::ArenaSizeL2;
@@ -153,7 +154,7 @@ void ins::MemoryController::SweepUnusedObjects() {
                   if (region->notified_availables.fetch_or(unusedBits) == 0) {
                      region->NotifyAvailables(true);
                   }
-                  sweptObjects += bitcount_64(unusedBits);
+                  sweptObjects += bit::bitcount_64(unusedBits);
                }
             }
          }
@@ -163,14 +164,14 @@ void ins::MemoryController::SweepUnusedObjects() {
    printf("sweep %lld objects\n", sweptObjects);
 }
 
-void ins::MemoryController::CheckValidity() {
+void mem::MemoryController::CheckValidity() {
    std::lock_guard<std::mutex> guard(this->contexts_lock);
    for (auto context = this->contexts; context; context = context->next.registered) {
       context->CheckValidity();
    }
 }
 
-void ins::MemoryController::Print() {
+void mem::MemoryController::Print() {
    std::lock_guard<std::mutex> guard(this->contexts_lock);
 
    struct tContextStats {
@@ -272,7 +273,7 @@ void ins::MemoryController::Print() {
    printf("--------------------------------------------------\n");
 }
 
-ins::MemoryContext* ins::MemoryController::AcquireContext() {
+mem::MemoryContext* mem::MemoryController::AcquireContext() {
    {
       std::lock_guard<std::mutex> guard(this->contexts_lock);
       for (auto context = this->contexts; context; context = context->next.registered) {
@@ -295,7 +296,7 @@ ins::MemoryContext* ins::MemoryController::AcquireContext() {
    }
 }
 
-ins::MemorySharedContext* ins::MemoryController::CreateSharedContext() {
+mem::MemorySharedContext* mem::MemoryController::CreateSharedContext() {
    auto context = Descriptor::New<MemorySharedContext>();
    context->allocated = true;
    context->Initiate(&this->central);
@@ -307,14 +308,14 @@ ins::MemorySharedContext* ins::MemoryController::CreateSharedContext() {
    return context;
 }
 
-void ins::MemoryController::DisposeContext(MemoryContext* _context) {
+void mem::MemoryController::DisposeContext(MemoryContext* _context) {
    auto context = static_cast<MemoryContext*>(_context);
    if (context->heap == &this->central && context->allocated) {
       context->allocated = false;
    }
 }
 
-void ins::MemoryController::SetTimeStampOption(bool enabled) {
+void mem::MemoryController::SetTimeStampOption(bool enabled) {
    std::lock_guard<std::mutex> guard(this->contexts_lock);
    ObjectAllocOptions options;
    options.enableTimeStamp = 1;
@@ -328,7 +329,7 @@ void ins::MemoryController::SetTimeStampOption(bool enabled) {
    }
 }
 
-void ins::MemoryController::SetStackStampOption(bool enabled) {
+void mem::MemoryController::SetStackStampOption(bool enabled) {
    std::lock_guard<std::mutex> guard(this->contexts_lock);
    ObjectAllocOptions options;
    options.enableStackStamp = 1;
@@ -342,14 +343,14 @@ void ins::MemoryController::SetStackStampOption(bool enabled) {
    }
 }
 
-void ins::MemoryController::SetSecurityPaddingOption(uint32_t paddingSize) {
+void mem::MemoryController::SetSecurityPaddingOption(uint32_t paddingSize) {
    std::lock_guard<std::mutex> guard(this->contexts_lock);
    for (auto context = this->contexts; context; context = context->next.registered) {
       context->options.enableSecurityPadding = paddingSize;
    }
 }
 
-void ins::MemoryController::RescueStarvedConsumer(StarvedConsumerToken& token) {
+void mem::MemoryController::RescueStarvedConsumer(StarvedConsumerToken& token) {
    {
       std::lock_guard<std::mutex> guard(this->notification_lock);
       token.next = this->starved_consumers;
@@ -360,7 +361,7 @@ void ins::MemoryController::RescueStarvedConsumer(StarvedConsumerToken& token) {
    token.signal.wait(guard);
 }
 
-void ins::MemoryController::ScheduleContextRecovery(MemoryContext* context) {
+void mem::MemoryController::ScheduleContextRecovery(MemoryContext* context) {
    if (context->next.recovered == none<MemoryContext>()) {
       {
          std::lock_guard<std::mutex> guard(this->notification_lock);
@@ -376,6 +377,6 @@ void ins::MemoryController::ScheduleContextRecovery(MemoryContext* context) {
    }
 }
 
-void ins::MemoryController::NotifyWorker() {
+void mem::MemoryController::NotifyWorker() {
    this->notification_signal.notify_one();
 }

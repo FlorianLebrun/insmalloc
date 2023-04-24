@@ -5,7 +5,7 @@
 #include <ins/memory/objects-pool.h>
 #include <ins/os/threading.h>
 
-namespace ins {
+namespace ins::mem {
 
    struct MemoryContext;
    struct MemorySharedContext;
@@ -23,12 +23,12 @@ namespace ins {
       ~MemoryLocalSite();
    };
 
-   struct MemoryContext {
+   struct MemoryContext : IMemoryConsumer {
       MemoryCentralContext* heap;
       ObjectAllocOptions options;
 
       std::mutex owning;
-      ins::OS::Thread thread;
+      ins::os::Thread thread;
       MemoryLocalSite* locals = 0;
       uint16_t id = 0;
 
@@ -56,6 +56,7 @@ namespace ins {
       friend struct Descriptor;
       friend struct MemoryController;
       void Initiate(MemoryCentralContext* heap);
+      void RescueStarvingSituation(size_t expectedByteLength) override;
    };
 
    struct MemorySharedContext : protected MemoryContext {

@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-namespace ins {
+namespace ins::mem {
    struct HookFunction {
       static const int c_MaxRedirection = 10;
 

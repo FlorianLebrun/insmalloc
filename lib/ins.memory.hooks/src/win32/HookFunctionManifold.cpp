@@ -7,7 +7,7 @@
 #include "patcher/preamble_patcher.h"
 
 using sidestep::PreamblePatcher;
-using namespace ins;
+using namespace ins::mem;
 
 #ifdef _MSC_VER
 #pragma comment(lib, "Psapi.lib")

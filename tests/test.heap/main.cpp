@@ -13,35 +13,6 @@
 
 using namespace ins;
 
-namespace DescriptorsTests {
-   void test_descriptor_region() {
-
-      struct TestExtDesc : Descriptor {
-         TestExtDesc() {
-            size_t commited = this->GetUsedSize();
-            size_t size = this->GetSize();
-            for (int i = sizeof(*this); i < commited; i++) ((char*)this)[i] = 0;
-            this->Resize(size);
-            for (int i = sizeof(*this); i < size; i++) ((char*)this)[i] = 0;
-         }
-      };
-      auto desc = Descriptor::NewExtensible<TestExtDesc>(1000000);
-      delete desc;
-
-      struct TestDesc : Descriptor {
-      };
-
-      std::vector<Descriptor*> descs;
-      for (int i = 0; i < 10000; i++) {
-         auto desc = Descriptor::New<TestDesc>();
-         descs.push_back(desc);
-      }
-      for (auto desc : descs) {
-         delete desc;
-      }
-   }
-}
-
 namespace ObjectsTests {
    /*void apply_cross_context_private_alloc(LocalObjectClassPool& contextAlloc, LocalObjectClassPool& contextDispose) {
       {
@@ -118,8 +89,8 @@ namespace ObjectsTests {
    }
 
    void test_private_object(MemoryCentralContext& heap) {
-      ins::ThreadDedicatedContext contextA(heap.AcquireContext(), true);
-      ins::ThreadDedicatedContext contextB(heap.AcquireContext(), true);
+      mem::ThreadDedicatedContext contextA(heap.AcquireContext(), true);
+      mem::ThreadDedicatedContext contextB(heap.AcquireContext(), true);
       int classId = 4;
 
       CentralObjectClassPool& heapObj = heap.objects_unmanaged[classId];
@@ -132,8 +103,8 @@ namespace ObjectsTests {
    }
 
    void test_shared_object(MemoryCentralContext& heap) {
-      ins::ThreadDedicatedContext contextA(heap.AcquireContext(), true);
-      ins::ThreadDedicatedContext contextB(heap.AcquireContext(), true);
+      mem::ThreadDedicatedContext contextA(heap.AcquireContext(), true);
+      mem::ThreadDedicatedContext contextB(heap.AcquireContext(), true);
       int classId = 4;
 
       CentralObjectClassPool& heapObj = heap.objects_unmanaged[classId];
@@ -147,31 +118,13 @@ namespace ObjectsTests {
 
 }
 
-namespace FileViewTests {
-   void test_direct_1() {
-      size_t fsize = 100000000;
-      auto fv = ins::DirectFileView::NewReadWrite("./ee.tmp", fsize, true);
-      auto buf = fv->MapBuffer(0, 1000);
-      auto bytes = fv->GetBase().as<char>();
-      for (size_t s = 16; s <= fsize; s += 4096) {
-         bool r = fv->ExtendSize(s);
-         for (size_t i = 16; i < s - 4; i += 4096 * (rand() % 32)) {
-            ((int*)&bytes[i])[0] = rand();
-         }
-         _ASSERT(r);
-      }
-      ins::RegionsHeap.Print();
-      delete fv;
-   }
-}
-
 namespace ManagedObjectsTests {
 
-   struct MyClass : ManagedClass<MyClass> {
-      ins::CRef<MyClass> parent;
-      ins::CRef<MyClass> next;
+   struct MyClass : mem::ManagedClass<MyClass> {
+      CRef<MyClass> parent;
+      CRef<MyClass> next;
       //std::string name = "hello";
-      static void __traverser__(ins::TraversalContext<SchemaDesc, MyClass>& context) {
+      static void __traverser__(mem::TraversalContext<mem::SchemaDesc, MyClass>& context) {
          context.visit_ref(offsetof(MyClass, parent));
          context.visit_ref(offsetof(MyClass, next));
          context.visit_ref(offsetof(MyClass, parent));
@@ -181,9 +134,9 @@ namespace ManagedObjectsTests {
       }
    };
    void apply_alloc_gc() {
-      ins::ThreadDedicatedContext context;
-      ins::CLocal<MyClass> x = new MyClass();
-      ins::Controller.central.PerformMemoryCleanup();
+      mem::ThreadDedicatedContext context;
+      CLocal<MyClass> x = new MyClass();
+      mem::Controller.central.PerformMemoryCleanup();
 
       x->next = new MyClass();
       x->next = new MyClass();
@@ -204,22 +157,21 @@ namespace ManagedObjectsTests {
          printf("> allocation time: %g s\n", chrono.GetDiffFloat(chrono.S));
       }
 
-      Controller.central.PerformMemoryCleanup();
+      mem::Controller.central.PerformMemoryCleanup();
 
       x.release();
 
-      Controller.central.PerformMemoryCleanup();
+      mem::Controller.central.PerformMemoryCleanup();
 
       //MemorySpace::Print();
    }
 }
 
-ins::ManagedSchema ins::ManagedClass<ManagedObjectsTests::MyClass>::schema;
+mem::ManagedSchema mem::ManagedClass<ManagedObjectsTests::MyClass>::schema;
 
 int main() {
    //DescriptorsTests::test_descriptor_region();
    if (0) {
-
       void* p;
       p = ins_malloc(6400000);
       ins_free(p);
@@ -227,16 +179,16 @@ int main() {
       ins_free(p);
    }
    if (0) {
-      ins::Controller.SetTimeStampOption(true);
-      ins::Controller.SetStackStampOption(true);
-      ins::Controller.SetSecurityPaddingOption(60);
+      mem::Controller.SetTimeStampOption(true);
+      mem::Controller.SetStackStampOption(true);
+      mem::Controller.SetSecurityPaddingOption(60);
    }
    if (0) {
       ManagedObjectsTests::apply_alloc_gc();
       return 0;
    }
    if (0) {
-      ins::ObjectAnalyticsInfos meta;
+      mem::ObjectAnalyticsInfos meta;
       auto a = ins_malloc(50);
       auto b = ins_malloc(50);
       auto p = ins_malloc(50);
@@ -245,69 +197,69 @@ int main() {
          printf("");
       }
       ins_free(p);
-      ins::RegionsHeap.Print();
+      mem::Regions.Print();
 
       ins_free(a);
       ins_free(b);
    }
    if (0) {
       printf("------------ Monothread --------------\n");
-      ins::ThreadDedicatedContext context;
+      mem::ThreadDedicatedContext context;
       test_perf_alloc();
    }
    if (1) {
       printf("------------ Cross-context --------------\n");
-      ins::RegionsHeap.maxUsablePhysicalBytes = size_t(1) << 31;
-      size_t limit = ins::RegionsHeap.maxUsablePhysicalBytes * 0.50;
-      size_t szblk = cst::ObjectLayoutBase[4].object_multiplier;
+      mem::Regions.SetMaxUsablePhysicalBytes( size_t(1) << 31);
+      size_t limit = mem::Regions.GetMaxUsablePhysicalBytes() * 0.50;
+      size_t szblk = mem::cst::ObjectLayoutBase[4].object_multiplier;
       size_t count = limit / szblk;
 
       void** p = new void* [count];
       {
-         ins::ThreadDedicatedContext context;
+         mem::ThreadDedicatedContext context;
          for (size_t i = 0; i < count; i++) {
             p[i] = ins_malloc(szblk);
          }
          context.Pop();
-         ins::Controller.Print();
+         mem::Controller.Print();
       }
       {
-         ins::ThreadDedicatedContext context;
+         mem::ThreadDedicatedContext context;
          for (size_t i = 0; i < count; i++) {
             ins_free(p[i]);
             p[i] = ins_malloc(szblk);
          }
-         ins::Controller.Print();
+         mem::Controller.Print();
          for (size_t i = 0; i < count; i++) {
             ins_free(p[i]);
          }
          delete p;
-         ins::Controller.Print();
+         mem::Controller.Print();
       }
    }
    if (0) {
       printf("------------ Multithread --------------\n");
       std::thread t1(
          []() {
-            ins::ThreadDedicatedContext context;
+            mem::ThreadDedicatedContext context;
             test_perf_alloc();
          }
       );
       std::thread t2(
          []() {
-            ins::ThreadDedicatedContext context;
+            mem::ThreadDedicatedContext context;
             test_perf_alloc();
          }
       );
       std::thread t3(
          []() {
-            ins::ThreadDedicatedContext context;
+            mem::ThreadDedicatedContext context;
             test_perf_alloc();
          }
       );
       std::thread t4(
          []() {
-            ins::ThreadDedicatedContext context;
+            mem::ThreadDedicatedContext context;
             test_perf_alloc();
          }
       );
@@ -318,13 +270,13 @@ int main() {
    }
    if (0) {
       printf("------------ Sequential overflow --------------\n");
-      ins::RegionsHeap.maxUsablePhysicalBytes = size_t(1) << 30;
-      size_t limit = ins::RegionsHeap.maxUsablePhysicalBytes * 0.8;
-      size_t szblk = cst::ObjectLayoutBase[4].object_multiplier;
+      mem::Regions.SetMaxUsablePhysicalBytes(size_t(1) << 30);
+      size_t limit = mem::Regions.GetMaxUsablePhysicalBytes() * 0.8;
+      size_t szblk = mem::cst::ObjectLayoutBase[4].object_multiplier;
       size_t count = limit / szblk;
       std::thread t1(
          [&]() {
-            ins::ThreadDedicatedContext context;
+            mem::ThreadDedicatedContext context;
             void** p = new void* [count];
             for (size_t i = 0; i < count; i++) {
                p[i] = ins_malloc(szblk);
@@ -339,18 +291,18 @@ int main() {
       t1.join();
       std::thread t2(
          [&]() {
-            ins::ThreadDedicatedContext context;
+            mem::ThreadDedicatedContext context;
             for (size_t sz = 0; sz < limit; sz += szblk) {
                ins_malloc(szblk);
             }
          }
       );
       t2.join();
-      ins::Controller.Print();
+      mem::Controller.Print();
    }
    {
-      ins::Controller.PerformMemoryCleanup();
-      ins::Controller.Print();
+      mem::Controller.PerformMemoryCleanup();
+      mem::Controller.Print();
    }
 
    return 0;

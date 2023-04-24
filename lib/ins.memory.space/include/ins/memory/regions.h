@@ -1,15 +1,17 @@
 #pragma once
 #include <ins/memory/descriptors.h>
-#include <ins/memory/config.h>
 
-namespace ins {
-   struct MemoryContext;
+namespace ins::mem {
+
+   struct IMemoryConsumer {
+      virtual void RescueStarvingSituation(size_t expectedByteLength) = 0;
+   };
 
    struct RegionLayoutID {
       enum {
          // Object region
-         ObjectRegionMin = cst::ObjectLayoutMin,
-         ObjectRegionMax = cst::ObjectLayoutMax,
+         Reserved_ObjectRegionMin = 0x00,
+         Reserved_ObjectRegionMax = 0x7f,
 
          // Specific region
          BufferRegion = 0x80,
@@ -27,7 +29,7 @@ namespace ins {
          return this->value == RegionLayoutID::FreeRegion;
       }
       bool IsObjectRegion() {
-         return this->value <= RegionLayoutID::ObjectRegionMax;
+         return this->value <= RegionLayoutID::Reserved_ObjectRegionMax;
       }
       void operator = (uint8_t value) {
          this->value = value;
@@ -66,7 +68,7 @@ namespace ins {
 
       // Arena location
       bool managed = false;
-      uint8_t segmentation = 0;
+      uint8_t segmentation = cst::ArenaSizeL2;
       uint16_t indice = 0;
 
       // Region allocation state
@@ -75,10 +77,11 @@ namespace ins {
       ArenaDescriptor* next = 0;
 
       // Region table
-      RegionLayoutID regions[1];
+      RegionLayoutID regions[1] = { RegionLayoutID::FreeRegion };
 
       ArenaDescriptor();
       ArenaDescriptor(uint8_t sizeL2);
+      void Initiate(uint8_t segmentation);
       size_t GetRegionCount() {
          return size_t(1) << (cst::ArenaSizeL2 - this->segmentation);
       }
@@ -119,127 +122,54 @@ namespace ins {
 
    /**********************************************************************
    *
-   *   Arena Region Cache
-   *
-   ***********************************************************************/
-   struct ArenaRegionCache {
-   private:
-      typedef struct sRegionChain {
-         sRegionChain* next;
-      } *RegionChain;
-      std::mutex lock;
-      RegionChain list = 0;
-      size_t count = 0;
-   public:
-      size_t size() {
-         return this->count;
-      }
-      void PushRegion(address_t ptr) {
-         std::lock_guard<std::mutex> guard(this->lock);
-         auto region = ptr.as<sRegionChain>();
-         region->next = this->list;
-         this->list = region;
-         this->count++;
-      }
-      address_t PopRegion() {
-         std::lock_guard<std::mutex> guard(this->lock);
-         if (auto region = this->list) {
-            this->list = region->next;
-            this->count--;
-            return region;
-         }
-         return address_t();
-      }
-   };
-
-   /**********************************************************************
-   *
-   *   Arena Class Pool
-   *
-   ***********************************************************************/
-   struct ArenaClassPool {
-      typedef tRegionSizingInfos::tSizing tSizing;
-
-      uint8_t pageSizeL2 = 0;
-      tSizing sizings[4];
-      uint8_t sizeL2 = 0;
-      ArenaRegionCache caches[4];
-      ArenaDescriptor* availables = 0;
-      uint16_t batchSizeL2 = 0;
-      bool managed = false;
-      std::mutex lock;
-      
-      void Initiate(uint8_t index, bool managed);
-      void Clean();
-
-      // Region management
-      address_t ReserveRegion();
-      address_t AllocateRegion(uint8_t sizingID, MemoryContext* context);
-      void DisposeRegion(address_t addr, uint8_t sizingID);
-      void CacheRegion(address_t addr, uint8_t sizingID);
-      void ReleaseRegion(address_t addr, uint8_t sizingID);
-
-      // Buffer management
-      address_t AllocateRegionEx(size_t size, MemoryContext* context);
-      void DisposeRegionEx(address_t address, size_t size);
-      void ReleaseRegionEx(address_t address, size_t size);
-
-   private:
-      address_t AcquireRegionRange(uint8_t layoutID);
-   };
-
-
-   /**********************************************************************
-   *
    *   Memory Region Heap
    *
    ***********************************************************************/
-   struct MemoryRegionHeap {
-      std::mutex lock;
-      std::atomic_size_t usedPhysicalBytes = 0;
-      size_t maxUsablePhysicalBytes = size_t(1) << 34;
+   struct MemoryRegions {
+      static ArenaEntry* ArenaMap;
 
-      ArenaClassPool arenas_unmanaged[cst::RegionSizingCount];
-      ArenaClassPool arenas_managed[cst::RegionSizingCount];
+      static void Initiate();
 
-      ArenaEntry arenas[cst::ArenaPerSpace];
-
-      MemoryRegionHeap();
-      void Initiate();
+      static size_t GetMaxUsablePhysicalBytes();
+      static void SetMaxUsablePhysicalBytes(size_t size);
 
       // Global memory management
-      bool RequirePhysicalBytes(size_t size, MemoryContext* context);
-      void ReleasePhysicalBytes(size_t size);
-      size_t GetUsedPhysicalBytes();
+      static bool RequirePhysicalBytes(size_t size, IMemoryConsumer* consumer);
+      static void ReleasePhysicalBytes(size_t size);
+      static size_t GetUsedPhysicalBytes();
 
       // Arena management
-      address_t ReserveArena();
+      static address_t ReserveArena();
 
       // Region management
-      Descriptor* GetRegionDescriptor(address_t address);
-      size_t GetRegionSize(address_t address);
-      void ForeachRegion(std::function<bool(ArenaDescriptor* arena, RegionLayoutID layout, address_t addr)>&& visitor);
-      void PerformMemoryCleanup();
+      static Descriptor* GetRegionDescriptor(address_t address);
+      static size_t GetRegionSize(address_t address);
+      static void ForeachRegion(std::function<bool(ArenaDescriptor* arena, RegionLayoutID layout, address_t addr)>&& visitor);
+      static void PerformMemoryCleanup();
 
       // Standard size allocation management
-      address_t AllocateUnmanagedRegion(uint8_t sizeL2, uint8_t sizingID, MemoryContext* context);
-      address_t AllocateManagedRegion(uint8_t sizeL2, uint8_t sizingID, MemoryContext* context);
-      address_t ReserveUnmanagedRegion(uint8_t sizeL2);
-      address_t ReserveManagedRegion(uint8_t sizeL2);
-      void ReleaseRegion(address_t address, uint8_t sizeL2, uint8_t sizingID);
-      void DisposeRegion(address_t address, uint8_t sizeL2, uint8_t sizingID);
+      static address_t AllocateUnmanagedRegion(uint8_t sizeL2, uint8_t sizingID, IMemoryConsumer* consumer);
+      static address_t AllocateManagedRegion(uint8_t sizeL2, uint8_t sizingID, IMemoryConsumer* consumer);
+      static address_t ReserveUnmanagedRegion(uint8_t sizeL2);
+      static address_t ReserveManagedRegion(uint8_t sizeL2);
+      static void ReleaseRegion(address_t address, uint8_t sizeL2, uint8_t sizingID);
+      static void DisposeRegion(address_t address, uint8_t sizeL2, uint8_t sizingID);
 
       // Adjusted size allocation management
-      address_t AllocateUnmanagedRegionEx(size_t size, MemoryContext* context);
-      address_t AllocateManagedRegionEx(size_t size, MemoryContext* context);
-      void ReleaseRegionEx(address_t address, size_t size);
-      void DisposeRegionEx(address_t address, size_t size);
+      static address_t AllocateUnmanagedRegionEx(size_t size, IMemoryConsumer* consumer);
+      static address_t AllocateManagedRegionEx(size_t size, IMemoryConsumer* consumer);
+      static void ReleaseRegionEx(address_t address, size_t size);
+      static void DisposeRegionEx(address_t address, size_t size);
 
       // Utils API
-      void Print();
+      static void Print();
    };
 
-   extern MemoryRegionHeap RegionsHeap;
+   struct RegionsSpaceInitiator {
+      RegionsSpaceInitiator();
+   };
+
+   extern"C" MemoryRegions Regions;
 
    /**********************************************************************
    *
@@ -262,7 +192,7 @@ namespace ins {
          return this->index << this->entry.segmentation;
       }
       static RegionLocation New(address_t address) {
-         auto entry = ins::RegionsHeap.arenas[address.arenaID];
+         auto entry = Regions.ArenaMap[address.arenaID];
          return RegionLocation(entry, address.position >> entry.segmentation);
       }
    };

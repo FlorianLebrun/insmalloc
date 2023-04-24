@@ -1,4 +1,4 @@
 
-namespace ins {
+namespace ins::mem {
    void PatchMemoryFunctions();
 }

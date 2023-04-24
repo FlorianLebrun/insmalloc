@@ -300,7 +300,7 @@ std::vector<tObjectClass> filterObjectClasses(std::vector<tObjectClass> classes,
    return selected_classes;
 }
 
-void generate_objects_config(std::string path) {
+void generate_objects_config(std::string src_path) {
    const double min_growth = 0.10;
    const double max_growth = 0.12;
    size_t pages[] = { 10,11,12,13,14,15,16,17,18,19,20 };
@@ -486,32 +486,30 @@ void generate_objects_config(std::string path) {
    // Generate config
    //----------------------------------------------
    {
-      std::ofstream out(path + "/include/ins/memory/config.h");
+      std::ofstream out(path + "/ins.memory.heap/include/ins/memory/config.h");
       out << "#pragma once\n";
-      out << "namespace ins {\n";
-      out << "   namespace cst {\n";
+      out << "namespace ins::mem::cst {\n";
       out << "\n";
-      out << "      const size_t ObjectLayoutMin  = " << 0 << ";\n";
-      out << "      const size_t ObjectLayoutMax = " << (classes.size() - 1) << ";\n";
-      out << "      const size_t ObjectLayoutCount = " << classes.size() << ";\n";
+      out << "   const size_t ObjectLayoutMin  = " << 0 << ";\n";
+      out << "   const size_t ObjectLayoutMax = " << (classes.size() - 1) << ";\n";
+      out << "   const size_t ObjectLayoutCount = " << classes.size() << ";\n";
       out << "\n";
-      out << "      const size_t ObjectRegionTemplateCount = " << rtemplates.size() << ";\n";
+      out << "   const size_t ObjectRegionTemplateCount = " << rtemplates.size() << ";\n";
       out << "\n";
-      out << "      const size_t LayoutRangeSizeCount = " << LayoutRangeSizeCount << ";\n";
-      out << "      const size_t SmallSizeLimit = LayoutRangeSizeCount << 3;\n";
-      out << "      const size_t MediumSizeLimit = SmallSizeLimit << 4;\n";
-      out << "      const size_t LargeSizeLimit = MediumSizeLimit << 4;\n";
+      out << "   const size_t LayoutRangeSizeCount = " << LayoutRangeSizeCount << ";\n";
+      out << "   const size_t SmallSizeLimit = LayoutRangeSizeCount << 3;\n";
+      out << "   const size_t MediumSizeLimit = SmallSizeLimit << 4;\n";
+      out << "   const size_t LargeSizeLimit = MediumSizeLimit << 4;\n";
       out << "\n";
-      out << "      struct tLayoutRangeBin {uint8_t layoutMin = 0, layoutMax = 0;};\n";
-      out << "      extern const uint8_t small_object_layouts[LayoutRangeSizeCount + 1];\n";
-      out << "      extern const tLayoutRangeBin medium_object_layouts[LayoutRangeSizeCount];\n";
-      out << "      extern const tLayoutRangeBin large_object_layouts[LayoutRangeSizeCount];\n";
-      out << "   }\n";
+      out << "   struct tLayoutRangeBin {uint8_t layoutMin = 0, layoutMax = 0;};\n";
+      out << "   extern const uint8_t small_object_layouts[LayoutRangeSizeCount + 1];\n";
+      out << "   extern const tLayoutRangeBin medium_object_layouts[LayoutRangeSizeCount];\n";
+      out << "   extern const tLayoutRangeBin large_object_layouts[LayoutRangeSizeCount];\n";
       out << "}\n";
       out.close();
    }
    {
-      std::ofstream out(path + "/src/memory/config.cpp");
+      std::ofstream out(path + "/ins.memory.heap/src/memory/config.cpp");
       out << "#include <ins/memory/contexts.h>\n";
       out << "#include <ins/memory/regions.h>\n";
       out << "\n";
@@ -582,6 +580,13 @@ void generate_objects_config(std::string path) {
          out << "," << itoa(large_object_layouts[i].layoutMax, tmp, 10) << "}, ";
       }
       out << "\n};\n\n";
+   }
+   {
+      std::ofstream out(src_path + "/ins.memory.space/src/memory/config.cpp");
+      out << "#include <ins/memory/contexts.h>\n";
+      out << "#include <ins/memory/regions.h>\n";
+      out << "\n";
+      char tmp[128];
 
       out << "const ins::tRegionSizingInfos ins::cst::RegionSizingInfos[cst::RegionSizingCount] = {\n";
       for (int szL2 = 0; szL2 < regionManifold.regions.size(); szL2++) {
@@ -616,5 +621,5 @@ void generate_objects_config(std::string path) {
 }
 
 int main() {
-   generate_objects_config("C:/git/project/insmalloc/lib/ins.memory.space");
+   generate_objects_config("C:/git/project/insmalloc/lib");
 }

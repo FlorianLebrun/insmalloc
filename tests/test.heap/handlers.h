@@ -11,16 +11,14 @@ struct no_malloc_handler {
    static const char* name() {
       return "no-malloc";
    }
-   __forceinline  static void* malloc(size_t) {
+   __declspec(noinline) static void* malloc(size_t) {
       static char bytes[2048];
-      ins::__nop();
       return bytes;
    }
-   static void free(void*) {
-      ins::__nop();
+   __declspec(noinline) static void free(void*) {
    }
    static bool check(void* p) {
-     return true;
+      return true;
    }
 };
 

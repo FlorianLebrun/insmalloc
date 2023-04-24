@@ -1,7 +1,7 @@
 #pragma once
 #include <ins/memory/descriptors.h>
 
-namespace ins {
+namespace ins::mem {
 
    struct FileBuffer {
       FileBuffer(uintptr_t base) {
@@ -27,8 +27,8 @@ namespace ins {
       address_t GetBase();
       size_t GetSize() override final;
       FileBuffer MapBuffer(uint32_t offset, size_t size) override final;
-      static ins::DirectFileView* ins::DirectFileView::NewReadOnly(const char* filename);
-      static ins::DirectFileView* ins::DirectFileView::NewReadWrite(const char* filename, size_t size, bool reset = false);
+      static DirectFileView* NewReadOnly(const char* filename);
+      static DirectFileView* NewReadWrite(const char* filename, size_t size, bool reset = false);
    };
 
 }

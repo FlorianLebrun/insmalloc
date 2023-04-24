@@ -5,6 +5,8 @@
 
 #define USE_MIMALLOC 1
 
+using namespace ins;
+
 struct tTest {
    int sizeMin = 0;
    int sizeMax = 0;
@@ -111,14 +113,14 @@ struct tTest {
          int size = sizeMin + (sizeDelta ? fastrand() % sizeDelta : 0);
          auto ptr = objects[i] = handler::malloc(size);
          if (!ptr) throw;
-         ins::ObjectBytes((void*)ptr)[0] = 1;
+         mem::ObjectBytes((void*)ptr)[0] = 1;
       }
       auto alloc_time_ns = c.GetDiffFloat(Chrono::NS);
 
       c.Start();
       for (int i = 0; i < count; i++) {
          auto ptr = objects[i];
-         ins::ObjectBytes((void*)ptr)[0] = 1;
+         mem::ObjectBytes((void*)ptr)[0] = 1;
          handler::free(ptr);
       }
       auto free_time_ns = c.GetDiffFloat(Chrono::NS);
@@ -144,7 +146,7 @@ struct tTest {
             int size = sizeMin + (sizeDelta ? fastrand() % sizeDelta : 0);
             auto ptr = handler::malloc(size);
             _ASSERT(uintptr_t(ptr) > 1000);
-            ins::ObjectBytes((void*)ptr)[0] = 1;
+            mem::ObjectBytes((void*)ptr)[0] = 1;
             //for (intptr_t k = 0; k < i; k++) INS_ASSERT(objects[k] != ptr);
             objects[i++] = ptr;
             ops++;
@@ -152,7 +154,7 @@ struct tTest {
          for (int k = 0; k < free_count; k++) {
             int p = fastrand() % i;
             auto ptr = objects[p];
-            ins::ObjectBytes((void*)ptr)[0] = 1;
+            mem::ObjectBytes((void*)ptr)[0] = 1;
             handler::free(ptr);
             objects[p] = objects[--i];
             objects[i] = 0;
@@ -163,7 +165,7 @@ struct tTest {
 
       for (int p = 0; p < i; p++) {
          auto ptr = objects[p];
-         ins::ObjectBytes((void*)ptr)[0] = 1;
+         mem::ObjectBytes((void*)ptr)[0] = 1;
          handler::free(objects[p]);
          ops++;
       }

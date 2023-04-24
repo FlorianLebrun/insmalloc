@@ -14,7 +14,7 @@ namespace ins {
    template<typename T>
    struct WeakRef {
    private:
-      ObjectHeader header = 0;
+      mem::ObjectHeader header = 0;
    public:
       bool alive() {
          return true;
@@ -31,7 +31,7 @@ namespace ins {
             prev->ReleaseWeak();
          }
          if (nwptr) {
-            this->header = ObjectHeader(nwptr)[-1];
+            this->header = mem::ObjectHeader(nwptr)[-1];
             this->header->RetainWeak();
          }
       }
@@ -47,7 +47,7 @@ namespace ins {
    template<typename T>
    struct LockRef {
    private:
-      ObjectHeader header = 0;
+      mem::ObjectHeader header = 0;
    public:
       T* get() {
          if (this->header) {
@@ -61,7 +61,7 @@ namespace ins {
             prev->Release();
          }
          if (nwptr) {
-            this->header = ObjectHeader(nwptr)[-1];
+            this->header = mem::ObjectHeader(nwptr)[-1];
             this->header->Retain();
          }
       }
@@ -83,7 +83,7 @@ namespace ins {
          return this->ptr;
       }
       T* operator = (T* nwptr) {
-         if (auto session = ObjectAnalysisSession::enabled) {
+         if (auto session = mem::ObjectAnalysisSession::enabled) {
             session->MarkPtr(nwptr);
          }
          return this->ptr = nwptr;
@@ -94,7 +94,7 @@ namespace ins {
    template <typename T>
    struct CLocal {
    private:
-      MemoryLocalSite site;
+      mem::MemoryLocalSite site;
    public:
       CLocal(T* object = 0)
          : site(object) {

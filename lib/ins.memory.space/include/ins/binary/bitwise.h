@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 
-namespace ins {
+namespace ins::bit {
 #ifdef GCC_ASM
 #define atomic_or(P, V) __sync_or_and_fetch((P), (V))
 #define atomic_and(P, V) __sync_and_and_fetch((P), (V))
@@ -288,6 +288,14 @@ namespace ins {
       if (value & lmask_64(n)) n++;
       return n;
    }
+
+   static inline size_t log2_floor_32(uint32_t value) {
+      return msb_32(value);
+   }
+   static inline size_t log2_floor_64(uint64_t value) {
+      return msb_64(value);
+   }
+
    static inline int bitcount_32(uint32_t x) {
       const uint32_t m1 = 0x55555555;
       const uint32_t m2 = 0x33333333;

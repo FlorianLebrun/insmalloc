@@ -3,7 +3,7 @@
 #include <ins/memory/schemas.h>
 #include <ins/memory/contexts.h>
 
-namespace ins {
+namespace ins::mem {
 
    /**********************************************************************
    *

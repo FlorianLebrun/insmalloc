@@ -8,8 +8,7 @@
 #include <ins/memory/structs.h>
 #include <ins/avl/AVLOperators.h>
 
-namespace ins {
-
+namespace ins::mem {
    struct DescriptorTypeID {
       enum {
          Undefined = 0,
@@ -70,5 +69,4 @@ namespace ins {
    protected:
       static BufferBytes AllocateDescriptor(size_t size, size_t usedSize = 0);
    };
-
 }

@@ -1,11 +1,11 @@
-set(target "ins.memory-test")
+set(target "test-ins.memory.heap")
 
 append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" DIRECTORIES "./")
 
 add_executable(${target} WIN32 ${files})
 set_target_properties(${target} PROPERTIES FOLDER "Tests")
 
-target_link_libraries(${target} PRIVATE mimalloc-static ins.memory.space ins.memory.hooks)
+target_link_libraries(${target} PRIVATE mimalloc-static ins.memory.heap ins.memory.hooks)
 target_link_options(${target} PRIVATE /SUBSYSTEM:CONSOLE)
 
 
