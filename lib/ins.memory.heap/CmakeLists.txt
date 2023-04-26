@@ -5,6 +5,8 @@ append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" ROOT "./include/ins" DIR
 
 add_library(${target} STATIC ${files})
 
+target_compile_options(${target} PRIVATE $<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/O2 /Ob2 /Oi /Ot /Oy /GT /GL /GS- /guard:cf>)
+
 target_include_directories(${target} PUBLIC "./include")
 
 target_link_libraries(${target} PUBLIC ins.memory.space)

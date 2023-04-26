@@ -1,4 +1,4 @@
-#include <ins/memory/regions.h>
+#include <ins/memory/map.h>
 #include <ins/memory/file-view.h>
 #include <stdio.h>
 #include <vector>
@@ -49,14 +49,14 @@ namespace FileViewTests {
          }
          _ASSERT(r);
       }
-      mem::Regions.Print();
+      mem::PrintMemoryInfos();
       delete fv;
    }
 }
 
 namespace RegionsTests {
    void test_basic() {
-      auto ptr = mem::Regions.AllocateUnmanagedRegion(24, 0, 0);
+      auto ptr = mem::AllocateUnmanagedRegion(24, 0, 0);
 
    }
    void test_defrag() {
@@ -64,7 +64,7 @@ namespace RegionsTests {
 }
 
 int main() {
-   mem::Regions.Initiate();
+   mem::InitializeMemory();
 
    DescriptorsTests::test_descriptor_region();
    DescriptorsTests::test_descriptor_region();

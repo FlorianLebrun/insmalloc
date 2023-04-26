@@ -1,5 +1,5 @@
 #include <ins/memory/file-view.h>
-#include <ins/memory/regions.h>
+#include <ins/memory/map.h>
 
 using namespace ins;
 using namespace ins::mem;

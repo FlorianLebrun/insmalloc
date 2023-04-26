@@ -19,7 +19,12 @@ add_subdirectory(./tools/mimalloc)
 add_subdirectory(./tests/test.regions)
 add_subdirectory(./tests/test.heap)
 
+# Organize targets in folders
 set_target_properties(ins.avl PROPERTIES FOLDER "Libs")
 set_target_properties(ins.memory.hooks PROPERTIES FOLDER "Libs")
 set_target_properties(ins.memory.heap PROPERTIES FOLDER "Libs")
 set_target_properties(ins.memory.space PROPERTIES FOLDER "Libs")
+set_target_properties(test-ins.memory.heap PROPERTIES FOLDER "Tests")
+set_target_properties(test-ins.memory.space PROPERTIES FOLDER "Tests")
+set_target_properties(ins.objects.config.generator PROPERTIES FOLDER "Tools")
+set_target_properties(mimalloc-static PROPERTIES FOLDER "Tools")

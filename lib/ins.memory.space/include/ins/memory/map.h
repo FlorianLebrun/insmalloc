@@ -81,7 +81,10 @@ namespace ins::mem {
 
       ArenaDescriptor();
       ArenaDescriptor(uint8_t sizeL2);
-      void Initiate(uint8_t segmentation);
+      void Initialize(uint8_t segmentation);
+      uintptr_t GetBase() {
+         return uintptr_t(this->indice) << cst::ArenaSizeL2;
+      }
       size_t GetRegionCount() {
          return size_t(1) << (cst::ArenaSizeL2 - this->segmentation);
       }
@@ -122,54 +125,56 @@ namespace ins::mem {
 
    /**********************************************************************
    *
-   *   Memory Region Heap
+   *   Memory Region
    *
    ***********************************************************************/
-   struct MemoryRegions {
-      static ArenaEntry* ArenaMap;
+   extern ArenaEntry* ArenaMap;
 
-      static void Initiate();
+   extern void InitializeMemory();
 
-      static size_t GetMaxUsablePhysicalBytes();
-      static void SetMaxUsablePhysicalBytes(size_t size);
+   extern size_t GetMaxUsablePhysicalBytes();
+   extern void SetMaxUsablePhysicalBytes(size_t size);
 
-      // Global memory management
-      static bool RequirePhysicalBytes(size_t size, IMemoryConsumer* consumer);
-      static void ReleasePhysicalBytes(size_t size);
-      static size_t GetUsedPhysicalBytes();
+   // Global memory management
+   extern bool RequirePhysicalBytes(size_t size, IMemoryConsumer* consumer);
+   extern void ReleasePhysicalBytes(size_t size);
+   extern size_t GetUsedPhysicalBytes();
 
-      // Arena management
-      static address_t ReserveArena();
+   // Arena management
+   extern address_t ReserveArena();
 
-      // Region management
-      static Descriptor* GetRegionDescriptor(address_t address);
-      static size_t GetRegionSize(address_t address);
-      static void ForeachRegion(std::function<bool(ArenaDescriptor* arena, RegionLayoutID layout, address_t addr)>&& visitor);
-      static void PerformMemoryCleanup();
+   // Region management
+   extern Descriptor* GetRegionDescriptor(address_t address);
+   extern size_t GetRegionSize(address_t address);
+   extern void ForeachRegion(std::function<bool(ArenaDescriptor* arena, RegionLayoutID layout, address_t addr)>&& visitor);
+   extern void PerformRegionsCleanup();
 
-      // Standard size allocation management
-      static address_t AllocateUnmanagedRegion(uint8_t sizeL2, uint8_t sizingID, IMemoryConsumer* consumer);
-      static address_t AllocateManagedRegion(uint8_t sizeL2, uint8_t sizingID, IMemoryConsumer* consumer);
-      static address_t ReserveUnmanagedRegion(uint8_t sizeL2);
-      static address_t ReserveManagedRegion(uint8_t sizeL2);
-      static void ReleaseRegion(address_t address, uint8_t sizeL2, uint8_t sizingID);
-      static void DisposeRegion(address_t address, uint8_t sizeL2, uint8_t sizingID);
+   // Standard size allocation management
+   extern address_t AllocateUnmanagedRegion(uint8_t sizeL2, uint8_t sizingID, IMemoryConsumer* consumer);
+   extern address_t AllocateManagedRegion(uint8_t sizeL2, uint8_t sizingID, IMemoryConsumer* consumer);
+   extern address_t ReserveUnmanagedRegion(uint8_t sizeL2);
+   extern address_t ReserveManagedRegion(uint8_t sizeL2);
+   extern void ReleaseRegion(address_t address, uint8_t sizeL2, uint8_t sizingID);
+   extern void DisposeRegion(address_t address, uint8_t sizeL2, uint8_t sizingID);
 
-      // Adjusted size allocation management
-      static address_t AllocateUnmanagedRegionEx(size_t size, IMemoryConsumer* consumer);
-      static address_t AllocateManagedRegionEx(size_t size, IMemoryConsumer* consumer);
-      static void ReleaseRegionEx(address_t address, size_t size);
-      static void DisposeRegionEx(address_t address, size_t size);
+   // Adjusted size allocation management
+   extern address_t AllocateUnmanagedRegionEx(size_t size, IMemoryConsumer* consumer);
+   extern address_t AllocateManagedRegionEx(size_t size, IMemoryConsumer* consumer);
+   extern void ReleaseRegionEx(address_t address, size_t size);
+   extern void DisposeRegionEx(address_t address, size_t size);
 
-      // Utils API
-      static void Print();
+   // Utils API
+   struct tMemoryStats {
+      size_t descriptors_used_bytes = 0;
+      size_t arenas_map_used_bytes = 0;
+      size_t used_bytes = 0;
    };
+   extern tMemoryStats GetMemoryStats();
+   extern void PrintMemoryInfos();
 
    struct RegionsSpaceInitiator {
       RegionsSpaceInitiator();
    };
-
-   extern"C" MemoryRegions Regions;
 
    /**********************************************************************
    *
@@ -192,7 +197,7 @@ namespace ins::mem {
          return this->index << this->entry.segmentation;
       }
       static RegionLocation New(address_t address) {
-         auto entry = Regions.ArenaMap[address.arenaID];
+         auto entry = mem::ArenaMap[address.arenaID];
          return RegionLocation(entry, address.position >> entry.segmentation);
       }
    };

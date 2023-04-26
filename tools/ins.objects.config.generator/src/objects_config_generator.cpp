@@ -1,12 +1,17 @@
 #include <ins/binary/alignment.h>
-#include <ins/memory/space.h>
+#include <ins/memory/map.h>
 #include <ins/memory/structs.h>
+#include <ins/memory/objects-base.h>
 #include <stdio.h>
 #include <vector>
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 
 using namespace ins;
+using namespace ins::mem;
+
+constexpr auto BlockDividerShift = tObjectLayoutBase::DividerShift;
 
 struct tRegionClass {
    int region_templateID = -1;
@@ -124,8 +129,8 @@ struct tObjectClass {
    size_t buffer_end = 0;
    size_t object_size = 0;
    size_t object_count = 0;
-   size_t object_divider = 0;
-   size_t object_multiplier = 0;
+   uint32_t object_divider = 0;
+   uint32_t object_multiplier = 0;
    size_t lost_bytes = 0;
    bool selected = false;
 
@@ -138,6 +143,7 @@ struct tObjectClass {
    tObjectClass(ObjectLayoutPolicy layoutPolicy, size_t object_size) {
       this->layoutPolicy = layoutPolicy;
       this->object_size = object_size;
+      this->object_count = 1;
       this->region = regionManifold.getRegionClass(cst::ArenaSizeL2);
       this->buffer_start = cst::ObjectRegionHeadSize;
       this->buffer_end = this->region->region_size;
@@ -157,7 +163,7 @@ struct tObjectClass {
          this->layoutPolicy = SmallObjectPolicy;
          this->buffer_start = cst::ObjectRegionHeadSize;
          this->buffer_end = buffer_start + this->object_count * this->object_size;
-         this->object_divider = ins::getBlockDivider(object_size);
+         this->object_divider = computeBlockDivider(this->object_size);
          this->object_multiplier = this->object_size;
          _ASSERT(this->buffer_end <= this->region->region_size);
          size_t private_retention_size = size_t(1) << 16;
@@ -180,25 +186,39 @@ struct tObjectClass {
    }
    std::string getLayoutPolicyName() {
       switch (this->layoutPolicy) {
-      case LargeObjectPolicy: return "ins::LargeObjectPolicy";
-      case SmallObjectPolicy: return "ins::SmallObjectPolicy";
-      case MediumObjectPolicy: return "ins::MediumObjectPolicy";
+      case LargeObjectPolicy: return "mem::LargeObjectPolicy";
+      case SmallObjectPolicy: return "mem::SmallObjectPolicy";
+      case MediumObjectPolicy: return "mem::MediumObjectPolicy";
       default: throw;
       }
    }
-   uint32_t getDivider() {
-      auto div = ((uint64_t(1) << 16) + object_size - 1) / object_size;
-      auto div2 = ((uint64_t(1) << 16) / object_size) - 1;
-      for (int i = 0; i < cst::PageSize; i++) {
-         auto r = applyBlockDivider(div, i);
-         auto r2 = applyBlockDivider(div2, i);
-         auto e = i / this->object_size;
-         if (r2 != e) {
-            throw;
+   bool checkBlockDivider() {
+      if (this->object_divider > 0) {
+         auto page_size = this->region->region_size;
+         for (uint64_t offset = 0; offset < page_size - cst::ObjectRegionHeadSize; offset++) {
+            auto index = applyBlockDivider(this->object_divider, offset);
+            auto index_expected = offset / this->object_size;
+            if (index != index_expected) {
+               return false;
+            }
          }
       }
-      return div;
+      else {
+         if (this->object_count > 1) {
+            return false;
+         }
+      }
+      return true;
    }
+
+   static uint32_t computeBlockDivider(uintptr_t block_size) {
+      return ((uint64_t(1) << BlockDividerShift) + block_size - 1) / block_size;
+   }
+
+   static uintptr_t applyBlockDivider(uint32_t divider, uintptr_t value) {
+      return (uint64_t(value) * uint64_t(divider)) >> BlockDividerShift;
+   }
+
    void print() {
       printf("[%s] size=%zu\tobjects=%zu\tregionszL2=%zu\tlost=%zu  \tretention(list=%d heap=%d context=%d)\n",
          this->getLayoutPolicyName().c_str(), object_size, object_count,
@@ -214,7 +234,7 @@ struct tObjectClass {
       return x->object_size - y->object_size;
    }
    static size_t keepSizeBit(size_t sz, int n) {
-      int k = msb_64(sz) + 1;
+      int k = bit::msb_64(sz) + 1;
       size_t mask = (k > n) ? (size_t(-1) << (k - n)) : -1;
       return sz & mask;
    }
@@ -257,7 +277,11 @@ std::vector<tObjectClass> computeObjectPotentialClasses(double gap_growth, size_
             tObjectClass next(object_size, page_sizeL2);
             if (next.isValid()) {
                if (prev.object_count != next.object_count) {
-                  if (prev.region->region_sizeL2 == page_sizeL2) classes.push_back(prev);
+                  if (prev.region->region_sizeL2 == page_sizeL2) {
+                     if (prev.checkBlockDivider()) {
+                        classes.push_back(prev);
+                     }
+                  }
                }
                prev = next;
             }
@@ -429,6 +453,14 @@ void generate_objects_config(std::string src_path) {
       }
    }
 
+   // Test objects size dividers table
+   //----------------------------------------------
+   for (int i = 0; i < layouts.size(); i++) {
+      if (!layouts[i]->checkBlockDivider()) {
+         throw;
+      }
+   }
+
    // Test objects size/id matching table
    //----------------------------------------------
    auto getLayoutForSize = [&](size_t size) -> uint8_t {
@@ -486,7 +518,7 @@ void generate_objects_config(std::string src_path) {
    // Generate config
    //----------------------------------------------
    {
-      std::ofstream out(path + "/ins.memory.heap/include/ins/memory/config.h");
+      std::ofstream out(src_path + "/ins.memory.heap/include/ins/memory/config.h");
       out << "#pragma once\n";
       out << "namespace ins::mem::cst {\n";
       out << "\n";
@@ -509,13 +541,15 @@ void generate_objects_config(std::string src_path) {
       out.close();
    }
    {
-      std::ofstream out(path + "/ins.memory.heap/src/memory/config.cpp");
+      std::ofstream out(src_path + "/ins.memory.heap/src/memory/config.cpp");
       out << "#include <ins/memory/contexts.h>\n";
-      out << "#include <ins/memory/regions.h>\n";
+      out << "#include <ins/memory/map.h>\n";
+      out << "\n";
+      out << "using namespace ins;\n";
       out << "\n";
       char tmp[128];
 
-      out << "const ins::tObjectLayoutBase ins::cst::ObjectLayoutBase[ins::cst::ObjectLayoutCount] = {\n";
+      out << "const mem::tObjectLayoutBase mem::cst::ObjectLayoutBase[mem::cst::ObjectLayoutCount] = {\n";
       for (int i = 0; i < layouts.size(); i++) {
          auto& cls = *layouts[i];
          out << "{";
@@ -525,16 +559,16 @@ void generate_objects_config(std::string src_path) {
       }
       out << "};\n\n";
 
-      out << "const uint64_t ins::cst::ObjectLayoutMask[ins::cst::ObjectLayoutCount] = {\n";
+      out << "const uint64_t mem::cst::ObjectLayoutMask[mem::cst::ObjectLayoutCount] = {\n";
       for (int i = 0; i < layouts.size(); i++) {
          auto& cls = *layouts[i];         
          if (cls.object_count > 64) throw;
-         sprintf(tmp, "0x%llx", lmask_64(cls.object_count));
+         sprintf(tmp, "0x%llx", bit::lmask_64(cls.object_count));
          out << tmp << ", ";
       }
       out << "};\n\n";
 
-      out << "const ins::tObjectRegionTemplate ins::cst::ObjectRegionTemplate[ins::cst::ObjectRegionTemplateCount] = {\n";
+      out << "const mem::tObjectRegionTemplate mem::cst::ObjectRegionTemplate[mem::cst::ObjectRegionTemplateCount] = {\n";
       for (int i = 0; i < rtemplates.size(); i++) {
          auto& rtpl = *rtemplates[i];
          out << "{";
@@ -544,7 +578,7 @@ void generate_objects_config(std::string src_path) {
       }
       out << "};\n\n";
 
-      out << "const ins::tObjectLayoutInfos ins::cst::ObjectLayoutInfos[ins::cst::ObjectLayoutCount] = {\n";
+      out << "const mem::tObjectLayoutInfos mem::cst::ObjectLayoutInfos[mem::cst::ObjectLayoutCount] = {\n";
       for (int i = 0; i < layouts.size(); i++) {
          auto& cls = *layouts[i];
          out << "{";
@@ -558,14 +592,14 @@ void generate_objects_config(std::string src_path) {
       }
       out << "};\n\n";
 
-      out << "const uint8_t ins::cst::small_object_layouts[ins::cst::LayoutRangeSizeCount+1] = {";
+      out << "const uint8_t mem::cst::small_object_layouts[mem::cst::LayoutRangeSizeCount+1] = {";
       for (size_t i = 0; i <= LayoutRangeSizeCount; i++) {
          if ((i % 32) == 0) out << "\n";
          out << itoa(small_object_layouts[i], tmp, 10) << ", ";
       }
       out << "\n};\n\n";
 
-      out << "const ins::cst::tLayoutRangeBin ins::cst::medium_object_layouts[ins::cst::LayoutRangeSizeCount] = {";
+      out << "const mem::cst::tLayoutRangeBin mem::cst::medium_object_layouts[mem::cst::LayoutRangeSizeCount] = {";
       for (size_t i = 0; i < LayoutRangeSizeCount; i++) {
          if ((i % 16) == 0) out << "\n";
          out << "{" << itoa(medium_object_layouts[i].layoutMin, tmp, 10);
@@ -573,7 +607,7 @@ void generate_objects_config(std::string src_path) {
       }
       out << "\n};\n\n";
 
-      out << "const ins::cst::tLayoutRangeBin ins::cst::large_object_layouts[ins::cst::LayoutRangeSizeCount] = {";
+      out << "const mem::cst::tLayoutRangeBin mem::cst::large_object_layouts[mem::cst::LayoutRangeSizeCount] = {";
       for (size_t i = 0; i < LayoutRangeSizeCount; i++) {
          if ((i % 16) == 0) out << "\n";
          out << "{" << itoa(large_object_layouts[i].layoutMin, tmp, 10);
@@ -583,12 +617,13 @@ void generate_objects_config(std::string src_path) {
    }
    {
       std::ofstream out(src_path + "/ins.memory.space/src/memory/config.cpp");
-      out << "#include <ins/memory/contexts.h>\n";
-      out << "#include <ins/memory/regions.h>\n";
+      out << "#include <ins/memory/map.h>\n";
+      out << "\n";
+      out << "using namespace ins;\n";
       out << "\n";
       char tmp[128];
 
-      out << "const ins::tRegionSizingInfos ins::cst::RegionSizingInfos[cst::RegionSizingCount] = {\n";
+      out << "const mem::tRegionSizingInfos mem::cst::RegionSizingInfos[cst::RegionSizingCount] = {\n";
       for (int szL2 = 0; szL2 < regionManifold.regions.size(); szL2++) {
          auto& cls = *regionManifold.regions[szL2];
          out << "/*sizeL2=" << cls.region_sizeL2 << "*/ ";
@@ -608,7 +643,7 @@ void generate_objects_config(std::string src_path) {
       }
       out << "};\n\n";
 
-      out << "const uint32_t ins::cst::RegionMasks[cst::RegionSizingCount] = {";
+      out << "const uint32_t mem::cst::RegionMasks[cst::RegionSizingCount] = {";
       for (int szL2 = 0; szL2 < regionManifold.regions.size(); szL2++) {
          auto& cls = *regionManifold.regions[szL2];
          if ((szL2 % 12) == 0) out << "\n";

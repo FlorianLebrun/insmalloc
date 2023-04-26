@@ -1,6 +1,7 @@
 #include <ins/binary/alignment.h>
 #include <ins/os/memory.h>
 #include <ins/os/threading.h>
+#include <atomic>
 
 #include <windows.h>
 #include <psapi.h>
@@ -57,6 +58,8 @@ namespace ins::os {
    }
 
    uintptr_t AcquireMemory(uintptr_t base, uintptr_t limit, uintptr_t size, uintptr_t alignement, DWORD flAllocationType, DWORD flProtect) {
+      static constexpr uint32_t unsuseful_reservation_limit = 30;
+      static std::atomic_uint32_t unsuseful_reservation;
       if (!limit) {
          limit = size_t(1) << 48;
       }
@@ -72,7 +75,10 @@ namespace ins::os {
                base = bit::align<intptr_t>(ptr, alignement);
             }
             VirtualFree(LPVOID(ptr), size, MEM_RELEASE);
-            printf("! unsuseful reservation detected !\n");
+            if (unsuseful_reservation++ == unsuseful_reservation_limit) {
+               printf("! %d unsuseful reservation detected !\n", unsuseful_reservation_limit);
+               unsuseful_reservation = 0;
+            }
          }
 
          // Try again for aligned base after found ptr

@@ -1,18 +1,20 @@
 #pragma once
-#include <ins/memory/regions.h>
+#include <ins/memory/map.h>
 #include <ins/memory/objects-base.h>
 
 namespace ins::mem {
 
-   struct SchemaDesc;
-   struct ISchemaInfos;
-   typedef uint32_t SchemaID;
+   typedef uint32_t ObjectSchemaID;
 
-   template<typename tSchema = SchemaDesc, typename tData = void>
+   struct IObjectSchema {
+      virtual const char* name() = 0;
+   };
+
+   template<typename sSchema = sObjectSchema, typename sData = void>
    struct TraversalContext {
       typedef void (*fVisitPtr)(TraversalContext* self, void* ptr);
-      tSchema* schema;
-      tData* data;
+      sSchema* schema;
+      sData* data;
       fVisitPtr visit_ptr;
       void visit_ref(uint32_t offset) {
          this->visit_ptr(this, (void*&)ObjectBytes(this->data)[offset]);
@@ -20,79 +22,72 @@ namespace ins::mem {
    };
 
    typedef void (*ObjectTraverser)(TraversalContext<>* context);
+   typedef void (*ObjectFinalizer)(void* ptr);
 
-   struct ISchemaInfos {
-      virtual const char* name() = 0;
-   };
+   struct sObjectSchema {
 
-   struct SchemaDesc {
+      enum StandardSchemaID {
+         OpaqueID = 0,
+         InvalidateID = 1,
+      };
+
       uint32_t base_size;
-      ISchemaInfos* infos = 0;
+      IObjectSchema* infos = 0;
       ObjectTraverser traverser = 0;
-      uint64_t _unused;
+      ObjectFinalizer finalizer = 0;
    };
-   static_assert(sizeof(SchemaDesc) == 32, "bad size");
+   static_assert(sizeof(sObjectSchema) == 32, "bad size");
 
-   struct SchemaFieldMap : SchemaDesc, ISchemaInfos {
-      struct Ref {
-         uint32_t offset;
-      };
-      uint32_t refs_count;
-      static void __traverser__(TraversalContext<SchemaFieldMap>& context) {
-         auto schema = context.schema;
-         auto refs = (Ref*)&BufferBytes(schema)[sizeof(SchemaFieldMap)];
-         for (int i = 0; schema->refs_count; i++) {
-            context.visit_ref(refs[i].offset);
-         }
-      }
-   };
-
-   struct SchemasHeap : RegionsSpaceInitiator {
-
-      struct SchemaArena : ArenaDescriptor {
-         SchemaArena() {
-            this->Initiate(cst::ArenaSizeL2);
-            this->availables_count--;
-            _ASSERT(this->availables_count == 0);
-         }
-      };
-
-      uintptr_t arenaBase;
-      SchemaArena arena;
-
-      std::mutex lock;
-      uintptr_t alloc_region_size;
-      uintptr_t alloc_cursor;
-      uintptr_t alloc_commited;
-      uintptr_t alloc_end;
-
-      SchemasHeap();
-      SchemaDesc* CreateSchema(ISchemaInfos* infos, uint32_t base_size, ObjectTraverser traverser);
-
-      SchemaID GetSchemaID(SchemaDesc* schema) { return (uintptr_t(schema) - this->arenaBase) / sizeof(SchemaDesc); }
-      SchemaDesc* GetSchemaDesc(SchemaID id) { return (SchemaDesc*)((uintptr_t(id) * sizeof(SchemaDesc)) + this->arenaBase); }
-   };
-
-   struct ManagedSchema : ISchemaInfos {
-      SchemaID id = 0;
+   struct ManagedSchema : IObjectSchema {
+      ObjectSchemaID id = 0;
       const char* type_name = 0;
       const char* name() override { return this->type_name; }
-      void load(const std::type_info& info, size_t size, ObjectTraverser traverser);
+      void InstallSchema(const std::type_info& info, size_t size, ObjectTraverser traverser, ObjectFinalizer finalizer);
       size_t size();
    };
 
-   template<typename T>
-   struct ManagedClass {
+   struct ManagedClassBase {
+
+      // Collected Reference: reference a collected object from a collected object
+      template<typename T>
+      struct Ref {
+      private:
+         T* ptr = 0;
+      public:
+         T* operator -> () {
+            return this->ptr;
+         }
+         T* operator = (T* nwptr) {
+            if (auto session = mem::ObjectAnalysisSession::enabled) {
+               session->MarkPtr(nwptr);
+            }
+            return this->ptr = nwptr;
+         }
+      };
+   };
+
+   template<class T>
+   struct ManagedClass : ManagedClassBase {
       static ManagedSchema schema;
+      typedef typename T Class;
+      static void __finalizer__(T* ptr) {
+         ptr->~Class();
+      }
       void* operator new(size_t size) {
-         if (schema.id == 0) schema.load(typeid(T), sizeof(T), ObjectTraverser(T::__traverser__));
-         _ASSERT(schema.size() == size);
-         return ins_new_managed(schema.id)->ptr();
+         if (schema.id == 0) {
+            schema.InstallSchema(typeid(T), sizeof(T), ObjectTraverser(&T::__traverser__), ObjectFinalizer(&__finalizer__));
+            _ASSERT(schema.size() == size);
+         }
+         return AllocateManagedObject(schema.id);
       }
       void operator delete(void* ptr) {
-         ins_free(ptr);
+         FreeObject(ptr);
       }
    };
 
-   extern SchemasHeap schemasHeap;
+   extern sObjectSchema* ObjectSchemas;
+   inline ObjectSchemaID GetObjectSchemaID(ObjectSchema schema) { return (uintptr_t(schema) - uintptr_t(ObjectSchemas)) / sizeof(sObjectSchema); }
+   inline ObjectSchema GetObjectSchema(ObjectSchemaID id) { return &ObjectSchemas[id]; }
+   extern ObjectSchema CreateObjectSchema(IObjectSchema* infos, uint32_t base_size, ObjectTraverser traverser, ObjectFinalizer finalizer);
+
 }

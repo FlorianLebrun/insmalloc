@@ -54,7 +54,7 @@ namespace ins::mem {
       bool managed = false;
       std::mutex lock;
 
-      void Initiate(uint8_t index, bool managed);
+      void Initialize(uint8_t index, bool managed);
       void Clean();
 
       // Region management
@@ -94,7 +94,7 @@ namespace ins::mem {
 
       MemoryDescriptor(uint32_t arena_pagecountL2) {
 
-         // Initiate arena map
+         // Initialize arena map
          auto arenas_map_size = sizeof(ArenaEntry) * cst::ArenaPerSpace;
          this->arenas_map = (ArenaEntry*)os::AllocateMemory(0, cst::SpaceSize, arenas_map_size, cst::PageSize);
          for (int i = 0; i < cst::ArenaPerSpace; i++) {
@@ -102,20 +102,20 @@ namespace ins::mem {
          }
 
          // Register descriptors arena
-         this->descriptors_arena.Initiate(cst::ArenaSizeL2);
+         this->descriptors_arena.Initialize(cst::ArenaSizeL2);
          this->descriptors_arena.indice = address_t(this).arenaID;
          this->descriptors_arena.availables_count--;
          this->descriptors_arena.regions[0] = RegionLayoutID::DescriptorHeapRegion;
          this->arenas_map[address_t(this).arenaID] = ArenaEntry(&this->descriptors_arena);
          _ASSERT(this->descriptors_arena.availables_count == 0);
 
-         // Initiate descriptors allocator
-         this->descriptors_allocator.Initiate(uintptr_t(this), sizeof(MemoryDescriptor), arena_pagecountL2);
+         // Initialize descriptors allocator
+         this->descriptors_allocator.Initialize(uintptr_t(this), sizeof(MemoryDescriptor), arena_pagecountL2);
 
-         // Initiate regions allocator
+         // Initialize regions allocator
          for (int i = 0; i < cst::RegionSizingCount; i++) {
-            this->arenas_unmanaged[i].Initiate(i, false);
-            this->arenas_managed[i].Initiate(i, true);
+            this->arenas_unmanaged[i].Initialize(i, false);
+            this->arenas_managed[i].Initialize(i, true);
          }
       }
 
@@ -123,7 +123,7 @@ namespace ins::mem {
          size_t base_sizeL2 = bit::log2_ceil_32(sizeof(MemoryDescriptor));
          if (base_sizeL2 < cst::PageSizeL2) base_sizeL2 = cst::PageSizeL2;
 
-         address_t buffer = mem::Regions.ReserveArena();
+         address_t buffer = mem::ReserveArena();
          os::CommitMemory(buffer, size_t(1) << base_sizeL2);
 
          auto space = new((void*)buffer) MemoryDescriptor(0);

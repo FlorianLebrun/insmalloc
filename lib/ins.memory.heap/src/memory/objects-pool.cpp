@@ -1,26 +1,19 @@
 #include <ins/memory/objects-pool.h>
-#include <ins/memory/space.h>
 #include <ins/memory/controller.h>
+#include <ins/timing.h>
 
 using namespace ins;
 using namespace ins::mem;
 
 void sObjectRegion::NotifyAvailables(bool managed) {
    if (this->owner) {
-      if (this->privated) {
-         this->owner->privateds[this->layoutID].notifieds.Push(this);
-      }
-      else {
-         this->owner->shareds[this->layoutID].notifieds.Push(this);
-      }
+      this->owner->objects[this->layoutID].notifieds.Push(this);
+   }
+   else if (managed) {
+      mem::Central->managed.objects[this->layoutID].notifieds.Push(this);
    }
    else {
-      if (managed) {
-         mem::Controller.central.managed.objects[this->layoutID].notifieds.Push(this);
-      }
-      else {
-         mem::Controller.central.unmanaged.objects[this->layoutID].notifieds.Push(this);
-      }
+      mem::Central->unmanaged.objects[this->layoutID].notifieds.Push(this);
    }
 }
 
@@ -30,7 +23,7 @@ void sObjectRegion::NotifyAvailables(bool managed) {
 *
 ***********************************************************************/
 
-void ObjectCentralContext::Initiate(bool managed) {
+void ObjectCentralContext::Initialize(bool managed) {
    this->managed = managed;
 }
 
@@ -65,7 +58,7 @@ void ObjectCentralContext::PushUsableRegion(ObjectRegion region) {
       this->PushDisposableRegion(region);
    }
    else {
-      _INS_DEBUG(printf("PushUsableRegion\n"));
+      _INS_TRACE(printf("PushUsableRegion\n"));
       usables.Push(region);
    }
 }
@@ -106,10 +99,90 @@ void ObjectCentralContext::ReceiveDisposables(uint8_t layoutID, ObjectRegionList
 *
 ***********************************************************************/
 
-bool ObjectLocalContext::ScavengeNotifiedRegions(uint8_t layoutID) {
-   uint32_t collecteds = this->ScavengeNotifiedRegions(this->privateds[layoutID].notifieds.Flush());
-   collecteds += this->ScavengeNotifiedRegions(this->shareds[layoutID].notifieds.Flush());
-   return collecteds > 0;
+void ObjectLocalContext::Initialize(MemoryContext* context, ObjectCentralContext* heap) {
+   this->managed = heap->managed;
+   this->context = context;
+   this->heap = heap;
+}
+
+void ObjectLocalContext::Scavenge() {
+   for (int layoutID = 0; layoutID < cst::ObjectLayoutCount; layoutID++) {
+      auto& pool = this->objects[layoutID];
+      auto& central = this->heap->objects[layoutID];
+
+      // Scavenge owned regions before dump
+      this->ScavengeNotifiedRegions(layoutID);
+
+      // Clean usables regions
+      pool.usables.CollectDisposables(pool.disposables);
+
+      // Dump all not full to central pool
+      std::lock_guard<std::mutex> guard(central.lock);
+      pool.usables.DumpInto(central.usables, 0);
+      pool.disposables.DumpInto(central.disposables, 0);
+   }
+}
+
+ObjectHeader ObjectLocalContext::AllocateObject(size_t size) {
+   auto objectLayoutID = getLayoutForSize(size);
+   _ASSERT(mem::cst::ObjectLayoutBase[objectLayoutID].object_multiplier == 0
+      || size <= mem::cst::ObjectLayoutBase[objectLayoutID].object_multiplier
+   );
+   if (objectLayoutID < cst::ObjectLayoutMax) {
+      return this->AcquireObject(objectLayoutID);
+   }
+   else {
+      return this->AllocateLargeObject(size);
+   }
+}
+
+ObjectHeader ObjectLocalContext::AllocateLargeObject(size_t size) {
+   auto region = sObjectRegion::New(this->managed, cst::ObjectLayoutMax, size, this);
+   auto obj = region->GetObjectAt(0);
+   region->availables = 0;
+   _ASSERT(ObjectLocation(&obj[1]).IsAlive());
+   return obj;
+}
+
+ObjectHeader ObjectLocalContext::AllocateInstrumentedObject(size_t size, ObjectAllocOptions options) {
+   size_t requiredSize = size + options.enableSecurityPadding;
+   if (options.enableAnalytics) requiredSize += sizeof(ObjectAnalyticsInfos);
+   auto objectLayoutID = getLayoutForSize(requiredSize);
+
+   // Allocate memory
+   ObjectHeader obj = 0;
+   if (objectLayoutID < cst::ObjectLayoutMax) {
+      obj = this->AcquireObject(objectLayoutID);
+   }
+   else {
+      obj = this->AllocateLargeObject(size);
+   }
+
+   // Configure analytics infos
+   uint32_t bufferLen = mem::cst::ObjectLayoutBase[objectLayoutID].object_multiplier;
+   if (options.enableAnalytics) {
+      bufferLen -= sizeof(ObjectAnalyticsInfos);
+      auto infos = (ObjectAnalyticsInfos*)&ObjectBytes(obj)[bufferLen];
+      infos->timestamp = timing::getCurrentTimestamp();
+      infos->stackstamp = 42;
+      obj->has_analytics_infos = 1;
+   }
+
+   // Configure security padding
+   if (options.enableSecurityPadding) {
+      uint8_t* paddingBytes = &ObjectBytes(obj)[size];
+      uint32_t paddingLen = bufferLen - size - sizeof(uint32_t);
+      uint32_t& paddingTag = (uint32_t&)paddingBytes[paddingLen];
+      paddingTag = size ^ 0xabababab;
+      memset(paddingBytes, 0xab, paddingLen);
+      obj->has_security_padding = 1;
+   }
+
+   return obj;
+}
+
+uint32_t ObjectLocalContext::ScavengeNotifiedRegions(uint8_t layoutID) {
+   return this->ScavengeNotifiedRegions(this->objects[layoutID].notifieds.Flush());
 }
 
 uint32_t ObjectLocalContext::ScavengeNotifiedRegions(ObjectRegion region) {
@@ -135,133 +208,82 @@ uint32_t ObjectLocalContext::ScavengeNotifiedRegions(ObjectRegion region) {
 }
 
 void ObjectLocalContext::PushDisposableRegion(uint8_t layoutID, ObjectRegion region) {
-   auto& disposables = this->disposables[layoutID];
-   disposables.Push(region);
+   auto& pool = this->objects[layoutID];
+   pool.disposables.Push(region);
    /*if (disposables.count > disposables.limit) {
       this->heap->ReceiveDisposables(layoutID, disposables);
    }*/
 }
 
 void ObjectLocalContext::PushUsableRegion(ObjectRegion region) {
-   auto& pool = region->privated ? this->privateds[region->layoutID] : this->shareds[region->layoutID];
+   auto& pool = this->objects[region->layoutID];
    if (region->next.used == none<sObjectRegion>()) {
       if (pool.usables.count > 1 && region->IsDisposable()) {
          this->PushDisposableRegion(region->layoutID, region);
       }
       else {
-         _INS_DEBUG(printf("PushUsableRegion\n"));
+         _INS_TRACE(printf("PushUsableRegion\n"));
          pool.usables.Push(region);
       }
    }
    else {
-      _INS_DEBUG(printf("overpush\n"));
+      _INS_TRACE(printf("overpush\n"));
    }
 }
 
-bool ObjectLocalContext::PullActivePrivatedRegion(uint8_t layoutID) {
-   auto& pool = this->privateds[layoutID];
-   _ASSERT(pool.active_region == 0);
-   auto nextRegion = pool.usables.Pop();
-   if (nextRegion) {
+ObjectRegion ObjectLocalContext::PullUsableRegion(uint8_t layoutID) {
+   auto& pool = this->objects[layoutID];
+   _ASSERT(!pool.usables.current || pool.usables.current->availables == 0);
+   pool.usables.Pop(); // Remove full current region
+   if (pool.usables.current) {
       // @TODO: Perf: this loop shall be optimized
-      while (pool.usables.count > 0 && nextRegion->IsDisposable()) {
-         this->PushDisposableRegion(layoutID, nextRegion);
-         nextRegion = pool.usables.Pop();
+      while (pool.usables.count > 0 && pool.usables.current->IsDisposable()) {
+         this->PushDisposableRegion(layoutID, pool.usables.Pop());
       }
    }
    else {
-      nextRegion = this->disposables[layoutID].Pop();
-      if (!nextRegion) {
-         if (this->ScavengeNotifiedRegions(layoutID)) {
-            auto nextRegion = pool.usables.Pop();
-            if (!nextRegion) {
-               nextRegion = this->disposables[layoutID].Pop();
-            }
-         }
-         if (!nextRegion) {
-            nextRegion = sObjectRegion::New(this->managed, layoutID, this);
-            nextRegion->privated = 1;
-         }
+      auto new_region = pool.disposables.Pop();
+      if (auto new_region = pool.disposables.Pop()) {
+         pool.usables.Push(new_region);
+      }
+      else  if (this->ScavengeNotifiedRegions(layoutID)) {
+         _ASSERT(pool.usables.current);
+      }
+      else {
+         _ASSERT(!pool.usables.current);
+         pool.usables.Push(sObjectRegion::New(this->managed, layoutID, this));
       }
    }
-   pool.active_region = nextRegion;
-   return true;
+   _INS_ASSERT(pool.usables.current->availables != 0);
+   return pool.usables.current;
 }
 
-__declspec(noinline) ObjectHeader ObjectLocalContext::AcquirePrivatedObject(uint8_t layoutID) {
-   auto& pool = this->privateds[layoutID];
-   do {
-      if (auto region = pool.active_region) {
-         _ASSERT(region->layoutID == layoutID);
-         // Get an object index
-         auto index = bit::lsb_64(region->availables);
+__declspec(noinline) ObjectHeader ObjectLocalContext::AcquireObject(uint8_t layoutID) {
+   auto& pool = this->objects[layoutID];
 
-         // Prepare new object
-         auto offset = cst::ObjectLayoutBase[layoutID].GetObjectOffset(index);
-         auto obj = ObjectHeader(&ObjectBytes(region)[offset]);
-
-         // Publish object as ready
-         auto bit = uint64_t(1) << index;
-         if ((region->availables ^= bit) == 0) {
-            pool.active_region = 0;
-         }
-
-         return obj;
-      }
-   } while (this->PullActivePrivatedRegion(layoutID));
-   return 0;
-}
-
-bool ObjectLocalContext::PullActiveSharedRegion(uint8_t layoutID) {
-   auto& pool = this->shareds[layoutID];
-   _ASSERT(pool.active_region == 0);
-   auto nextRegion = pool.usables.Pop();
-   if (nextRegion) {
-      // @TODO: Perf: this loop shall be optimized
-      while (pool.usables.count > 0 && nextRegion->IsDisposable()) {
-         this->PushDisposableRegion(layoutID, nextRegion);
-         nextRegion = pool.usables.Pop();
-      }
+   // Acquire region with available objects
+   auto region = pool.usables.current;
+   if (!region) {
+      region = this->PullUsableRegion(layoutID);
    }
-   else {
-      nextRegion = this->disposables[layoutID].Pop();
-      if (!nextRegion) {
-         if (this->ScavengeNotifiedRegions(layoutID)) {
-            auto nextRegion = pool.usables.Pop();
-            if (!nextRegion) {
-               nextRegion = this->disposables[layoutID].Pop();
-            }
-         }
-         if (!nextRegion) {
-            nextRegion = sObjectRegion::New(this->managed, layoutID, this);
-            nextRegion->privated = 0;
-         }
-      }
+   _INS_ASSERT(region->layoutID == layoutID);
+   _INS_ASSERT(region->availables != 0);
+
+   // Get an object index
+   auto index = bit::lsb_64(region->availables);
+
+   // Prepare new object
+   auto offset = cst::ObjectLayoutBase[layoutID].GetObjectOffset(index);
+   auto obj = ObjectHeader(&ObjectBytes(region)[offset]);
+   _ASSERT(index == cst::ObjectLayoutBase[layoutID].GetObjectIndex(offset));
+   _ASSERT(index == cst::ObjectLayoutBase[layoutID].GetObjectIndex(offset + cst::ObjectLayoutBase[layoutID].object_multiplier - 1));
+
+   // Publish object as ready
+   auto bit = uint64_t(1) << index;
+   if ((region->availables ^= bit) == 0) {
+      pool.usables.Pop();
    }
-   pool.active_region = nextRegion;
-   return true;
-}
 
-__declspec(noinline) ObjectHeader ObjectLocalContext::AcquireSharedObject(uint8_t layoutID) {
-   auto& pool = this->shareds[layoutID];
-   do {
-      if (auto region = pool.active_region) {
-
-         // Get an object index
-         auto index = bit::lsb_64(region->availables);
-
-         // Prepare new object
-         auto offset = cst::ObjectLayoutBase[layoutID].GetObjectOffset(index);
-         auto obj = ObjectHeader(&ObjectBytes(region)[offset]);
-
-         // Publish object as ready
-         auto bit = uint64_t(1) << index;
-         if ((region->availables ^= bit) == 0) {
-            pool.active_region = 0;
-         }
-
-         return obj;
-      }
-   } while (this->PullActiveSharedRegion(layoutID));
-   return 0;
+   _ASSERT(ObjectLocation(&obj[1]).IsAlive());
+   return obj;
 }

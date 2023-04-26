@@ -1,4 +1,4 @@
-#include <ins/memory/regions.h>
+#include <ins/memory/map.h>
 
 using namespace ins;
 

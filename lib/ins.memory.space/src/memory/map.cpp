@@ -1,4 +1,4 @@
-#include <ins/memory/regions.h>
+#include <ins/memory/map.h>
 #include <ins/os/memory.h>
 #include "./descriptors-allocator.h"
 #include "./regions-allocator.h"
@@ -6,15 +6,14 @@
 using namespace ins;
 using namespace ins::mem;
 
-MemoryRegions mem::Regions;
-ArenaEntry* mem::MemoryRegions::ArenaMap = 0;
+ArenaEntry* mem::ArenaMap = 0;
 mem::MemoryDescriptor* mem::space = 0;
 
 ArenaDescriptor mem::ArenaDescriptor::UnusedArena;
 ArenaDescriptor mem::ArenaDescriptor::ForbiddenArena;
 
 mem::RegionsSpaceInitiator::RegionsSpaceInitiator() {
-   mem::Regions.Initiate();
+   mem::InitializeMemory();
 }
 
 mem::ArenaDescriptor::ArenaDescriptor()
@@ -25,11 +24,11 @@ mem::ArenaDescriptor::ArenaDescriptor()
 mem::ArenaDescriptor::ArenaDescriptor(uint8_t segmentation)
    : Descriptor(DescriptorTypeID::Arena)
 {
-   mem::Regions.Initiate();
-   this->Initiate(segmentation);
+   mem::InitializeMemory();
+   this->Initialize(segmentation);
 }
 
-void mem::ArenaDescriptor::Initiate(uint8_t segmentation) {
+void mem::ArenaDescriptor::Initialize(uint8_t segmentation) {
    this->segmentation = segmentation;
    this->availables_count = cst::ArenaSize >> segmentation;
    memset(this->regions, RegionLayoutID::FreeRegion, this->availables_count);
@@ -54,7 +53,7 @@ const char* RegionLayoutID::GetLabel() {
 *
 ***********************************************************************/
 
-void ArenaClassPool::Initiate(uint8_t index, bool managed) {
+void ArenaClassPool::Initialize(uint8_t index, bool managed) {
    auto& infos = mem::cst::RegionSizingInfos[index];
    this->sizings[0] = infos.sizings[0];
    this->sizings[1] = infos.sizings[1];
@@ -88,7 +87,7 @@ address_t ArenaClassPool::AllocateRegion(uint8_t sizingID, IMemoryConsumer* cons
    }
    auto committedSize = this->sizings[sizingID].committedSize;
    auto committedCount = committedSize < cst::PageSize ? cst::PageSize / committedSize : 1;
-   if (mem::Regions.RequirePhysicalBytes(committedSize, consumer)) {
+   if (mem::RequirePhysicalBytes(committedSize, consumer)) {
       auto ptr = this->AcquireRegionRange(RegionLayoutID::FreeCachedRegion);
       os::CommitMemory(ptr, committedSize);
       if (this->batchSizeL2) {
@@ -152,7 +151,7 @@ address_t ArenaClassPool::AcquireRegionRange(uint8_t layoutID) {
    // Acquire a arena with availables regions
    auto arena = this->availables;
    if (!arena) {
-      address_t base = mem::Regions.ReserveArena();
+      address_t base = mem::ReserveArena();
       if (!base) throw std::exception("OOM");
       arena = Descriptor::NewBuffer<ArenaDescriptor>(ArenaDescriptor::GetDescriptorSize(this->sizeL2), this->sizeL2);
       arena->indice = base.arenaID;
@@ -214,7 +213,7 @@ address_t ArenaClassPool::AllocateRegionEx(size_t size, IMemoryConsumer* consume
       }
    }
    auto committedSize = pages << this->pageSizeL2;
-   if (mem::Regions.RequirePhysicalBytes(committedSize, consumer)) {
+   if (mem::RequirePhysicalBytes(committedSize, consumer)) {
       auto address = this->ReserveRegion();
       _ASSERT(committedSize <= this->sizings[0].committedSize);
       os::CommitMemory(address, committedSize);
@@ -250,7 +249,7 @@ void ArenaClassPool::ReleaseRegionEx(address_t address, size_t size) {
    }
    loc.layout() = RegionLayoutID::FreeCachedRegion;
    os::DecommitMemory(address.ptr, size);
-   mem::Regions.ReleasePhysicalBytes(size);
+   mem::ReleasePhysicalBytes(size);
    loc.layout() = RegionLayoutID::FreeRegion;
 }
 
@@ -264,22 +263,22 @@ static size_t GetBufferRegionSizing(size_t size) {
    return bit::log2_ceil_32(size);
 }
 
-void MemoryRegions::Initiate() {
+void mem::InitializeMemory() {
    if (!space) {
       space = MemoryDescriptor::New();
-      MemoryRegions::ArenaMap = space->arenas_map;
+      mem::ArenaMap = space->arenas_map;
    }
 }
 
-void MemoryRegions::SetMaxUsablePhysicalBytes(size_t size) {
+void mem::SetMaxUsablePhysicalBytes(size_t size) {
    space->maxUsablePhysicalBytes = size;
 }
 
-size_t MemoryRegions::GetMaxUsablePhysicalBytes() {
+size_t mem::GetMaxUsablePhysicalBytes() {
    return space->maxUsablePhysicalBytes;
 }
 
-bool MemoryRegions::RequirePhysicalBytes(size_t size, IMemoryConsumer* consumer) {
+bool mem::RequirePhysicalBytes(size_t size, IMemoryConsumer* consumer) {
    space->usedPhysicalBytes += size;
    if (space->usedPhysicalBytes > space->maxUsablePhysicalBytes) {
       consumer->RescueStarvingSituation(size);
@@ -291,15 +290,15 @@ bool MemoryRegions::RequirePhysicalBytes(size_t size, IMemoryConsumer* consumer)
    return true;
 }
 
-void MemoryRegions::ReleasePhysicalBytes(size_t size) {
+void mem::ReleasePhysicalBytes(size_t size) {
    space->usedPhysicalBytes -= size;
 }
 
-size_t MemoryRegions::GetUsedPhysicalBytes() {
+size_t mem::GetUsedPhysicalBytes() {
    return space->usedPhysicalBytes;
 }
 
-Descriptor* MemoryRegions::GetRegionDescriptor(address_t address) {
+Descriptor* mem::GetRegionDescriptor(address_t address) {
    if (auto arena = space->arenas_map[address.arenaID]) {
       auto regionID = address.position >> arena.segmentation;
       auto regionEntry = arena.descriptor()->regions[regionID];
@@ -311,32 +310,32 @@ Descriptor* MemoryRegions::GetRegionDescriptor(address_t address) {
    return 0;
 }
 
-size_t MemoryRegions::GetRegionSize(address_t address) {
+size_t mem::GetRegionSize(address_t address) {
    auto arena = space->arenas_map[address.arenaID];
    return size_t(1) << arena.segmentation;
 }
 
-address_t MemoryRegions::ReserveArena() {
+address_t mem::ReserveArena() {
    return os::ReserveMemory(0, cst::SpaceSize, cst::ArenaSize, cst::ArenaSize);
 }
 
-address_t MemoryRegions::ReserveUnmanagedRegion(uint8_t sizeL2) {
+address_t mem::ReserveUnmanagedRegion(uint8_t sizeL2) {
    return space->arenas_unmanaged[sizeL2].ReserveRegion();
 }
 
-address_t MemoryRegions::ReserveManagedRegion(uint8_t sizeL2) {
+address_t mem::ReserveManagedRegion(uint8_t sizeL2) {
    return space->arenas_managed[sizeL2].ReserveRegion();
 }
 
-address_t MemoryRegions::AllocateUnmanagedRegion(uint8_t sizeL2, uint8_t sizingID, IMemoryConsumer* consumer) {
+address_t mem::AllocateUnmanagedRegion(uint8_t sizeL2, uint8_t sizingID, IMemoryConsumer* consumer) {
    return space->arenas_unmanaged[sizeL2].AllocateRegion(sizingID, consumer);
 }
 
-address_t MemoryRegions::AllocateManagedRegion(uint8_t sizeL2, uint8_t sizingID, IMemoryConsumer* consumer) {
+address_t mem::AllocateManagedRegion(uint8_t sizeL2, uint8_t sizingID, IMemoryConsumer* consumer) {
    return space->arenas_managed[sizeL2].AllocateRegion(sizingID, consumer);
 }
 
-void MemoryRegions::ReleaseRegion(address_t address, uint8_t sizeL2, uint8_t sizingID) {
+void mem::ReleaseRegion(address_t address, uint8_t sizeL2, uint8_t sizingID) {
    auto arena = space->arenas_map[address.arenaID];
    if (arena.segmentation != sizeL2) {
       throw "invalid sizeL2";
@@ -347,7 +346,7 @@ void MemoryRegions::ReleaseRegion(address_t address, uint8_t sizeL2, uint8_t siz
    }
 }
 
-void MemoryRegions::DisposeRegion(address_t address, uint8_t sizeL2, uint8_t sizingID) {
+void mem::DisposeRegion(address_t address, uint8_t sizeL2, uint8_t sizingID) {
    auto arena = space->arenas_map[address.arenaID];
    if (arena.segmentation != sizeL2) {
       throw "invalid sizeL2";
@@ -358,17 +357,17 @@ void MemoryRegions::DisposeRegion(address_t address, uint8_t sizeL2, uint8_t siz
    }
 }
 
-address_t MemoryRegions::AllocateUnmanagedRegionEx(size_t size, IMemoryConsumer* consumer) {
+address_t mem::AllocateUnmanagedRegionEx(size_t size, IMemoryConsumer* consumer) {
    auto sizeL2 = GetBufferRegionSizing(size);
    return space->arenas_unmanaged[sizeL2].AllocateRegionEx(size, consumer);
 }
 
-address_t MemoryRegions::AllocateManagedRegionEx(size_t size, IMemoryConsumer* consumer) {
+address_t mem::AllocateManagedRegionEx(size_t size, IMemoryConsumer* consumer) {
    auto sizeL2 = GetBufferRegionSizing(size);
    return space->arenas_managed[sizeL2].AllocateRegionEx(size, consumer);
 }
 
-void MemoryRegions::ReleaseRegionEx(address_t address, size_t size) {
+void mem::ReleaseRegionEx(address_t address, size_t size) {
    auto arena = space->arenas_map[address.arenaID];
    auto sizeL2 = GetBufferRegionSizing(size);
    if (arena.segmentation != sizeL2) {
@@ -380,7 +379,7 @@ void MemoryRegions::ReleaseRegionEx(address_t address, size_t size) {
    }
 }
 
-void MemoryRegions::DisposeRegionEx(address_t address, size_t size) {
+void mem::DisposeRegionEx(address_t address, size_t size) {
    auto arena = space->arenas_map[address.arenaID];
    auto sizeL2 = GetBufferRegionSizing(size);
    if (arena.segmentation != sizeL2) {
@@ -392,14 +391,14 @@ void MemoryRegions::DisposeRegionEx(address_t address, size_t size) {
    }
 }
 
-void MemoryRegions::PerformMemoryCleanup() {
+void mem::PerformRegionsCleanup() {
    for (int i = 0; i < cst::RegionSizingCount; i++) {
       space->arenas_unmanaged[i].Clean();
       space->arenas_managed[i].Clean();
    }
 }
 
-void MemoryRegions::ForeachRegion(std::function<bool(ArenaDescriptor* arena, RegionLayoutID layout, address_t addr)>&& visitor) {
+void mem::ForeachRegion(std::function<bool(ArenaDescriptor* arena, RegionLayoutID layout, address_t addr)>&& visitor) {
    for (address_t addr; addr.arenaID < cst::ArenaPerSpace; addr.arenaID++) {
       auto arena = space->arenas_map[addr.arenaID].descriptor();
       auto region_size = size_t(1) << arena->segmentation;
@@ -415,8 +414,16 @@ void MemoryRegions::ForeachRegion(std::function<bool(ArenaDescriptor* arena, Reg
    }
 }
 
-void MemoryRegions::Print() {
-   mem::Regions.ForeachRegion(
+tMemoryStats mem::GetMemoryStats() {
+   tMemoryStats stats;
+   stats.descriptors_used_bytes = space->descriptors_allocator.used_bytes;
+   stats.arenas_map_used_bytes = sizeof(ArenaEntry) * cst::ArenaPerSpace;
+   stats.used_bytes = space->usedPhysicalBytes;
+   return stats;
+}
+
+void mem::PrintMemoryInfos() {
+   mem::ForeachRegion(
       [&](ArenaDescriptor* arena, RegionLayoutID layout, address_t addr) {
          printf("\n%X%.8llX %s: %s", int(addr.arenaID), int64_t(addr.position), sz2a(size_t(1) << arena->segmentation).c_str(), layout.GetLabel());
          return true;
@@ -424,7 +431,7 @@ void MemoryRegions::Print() {
    );
    printf("\n");
 
-   auto usedBytes = mem::Regions.GetUsedPhysicalBytes();
+   auto usedBytes = mem::GetUsedPhysicalBytes();
    printf("Memory used: %s\n", sz2a(usedBytes).c_str());
 }
 

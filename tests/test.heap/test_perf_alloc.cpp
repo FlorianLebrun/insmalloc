@@ -38,70 +38,6 @@ struct tTest {
       this->count = 140000;
    }
 
-   /*__declspec(noinline) void test_ins_malloc_2()
-   {
-      Chrono c;
-      std::vector<void*> objects(count);
-      int sizeDelta = sizeMax - sizeMin;
-      printf(">>> start: %lg s\n", ins::timing::getCurrentTime());
-      c.Start();
-      for (int i = 0; i < count; i++) {
-         int size = sizeMin + (sizeDelta ? fastrand() % sizeDelta : 0);
-         ins::tObjectInfos infos;
-         auto obj = ins_new(size, 4887);
-         objects[i] = obj;
-         //memset(objects[i], 0, size);
-         if (!ins_get_address_infos(obj, &infos))
-            printf("bad object\n");
-         else if (infos.heapID != 0) printf("bad heapID\n");
-         // printf(">> %d bytes at %.8X\n", int(size), uintptr_t(objects[i]));
-      }
-      printf("[ins-malloc] alloc time = %g ns\n", c.GetDiffFloat(Chrono::NS) / float(count));
-      printf(">>> end: %lg s\n", ins::timing::getCurrentTime());
-      c.Start();
-
-      ins::tObjectInfos infos;
-      if (0) {
-         for (int i = test_remain_count; i < count; i++) {
-            int k = fastrand() % objects.size();
-            void* obj = objects[k];
-            objects[k] = objects.back();
-            objects.pop_back();
-            ins_free(obj);
-         }
-      }
-      else if (1) {
-         for (int i = test_remain_count; i < count; i++) {
-            int k = objects.size() - 1;
-            void* obj = objects[k];
-            if (!ins_get_address_infos(obj, &infos)) printf("bad object\n");
-            else if (infos.heapID != 0) printf("bad heapID\n");
-            objects.pop_back();
-            ins_free(obj);
-         }
-      }
-      else {
-         for (int i = test_remain_count; i < count; i++) {
-            void* obj = objects[i];
-            ins_free(obj);
-         }
-      }
-      printf("[ins-malloc] free time = %g ns\n", c.GetDiffFloat(Chrono::NS) / float(count));
-      ins_flush_cache();
-      ins_flush_cache();
-      ins_flush_cache();
-      ins_flush_cache();
-      ins_flush_cache();
-      ins::memory::checkObjectsOverflow();
-      //ins::memory::table.print();
-      //system("pause");
-      for (int i = 0; i < test_remain_count; i++) {
-         printf(">> remain at %.12llX\n", int64_t(objects[i]));
-      }
-
-      return;
-   }*/
-
    template<class handler>
    __declspec(noinline) void apply_fill_and_flush() {
       Chrono c;
@@ -231,7 +167,7 @@ void test_perf_alloc() {
 #endif
 
    tTest test;
-   test.setSizeProfile(20, 20, max_count);
+   test.setSizeProfile(20, 1020, max_count);
    //test.setSmallSizeProfile();
    //test.setMediumSizeProfile();
    //test.setBigSizeProfile();

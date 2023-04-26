@@ -1,9 +1,7 @@
 #pragma once
 #include <mimalloc.h>
 #include <ins/binary/alignment.h>
-#include <ins/memory/space.h>
 #include <ins/memory/contexts.h>
-#include <ins/memory/space.h>
 #include <ins/hooks.h>
 #include "./utils.h"
 
@@ -57,10 +55,10 @@ struct ins_malloc_handler {
       return "ins-malloc";
    }
    static void* malloc(size_t s) {
-      return ins_malloc(s);
+      return ins::mem::AllocateUnmanagedObject(0, s);
    }
    static void free(void* p) {
-      return ins_free(p);
+      ins::mem::FreeObject(p);
    }
    static bool check(void* p) {
       //ins::ObjectLocation loc(uintptr_t(p));

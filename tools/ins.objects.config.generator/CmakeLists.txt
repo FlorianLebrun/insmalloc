@@ -4,7 +4,6 @@ append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" ROOT "./src" DIRECTORIES
 append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" ROOT "./include/ins" DIRECTORIES "./" "./binary" "./memory")
 
 add_executable(${target} WIN32 ${files})
-set_target_properties(${target} PROPERTIES FOLDER "Tools")
 
 target_link_libraries(${target} PUBLIC ins.avl ins.memory.heap)
 target_link_options(${target} PRIVATE /SUBSYSTEM:CONSOLE)

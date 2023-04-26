@@ -1,95 +1,70 @@
 #pragma once
-#include <ins/memory/regions.h>
-#include <ins/memory/schemas.h>
+#include <ins/memory/map.h>
 #include <ins/memory/objects-base.h>
 #include <ins/memory/objects-pool.h>
+#include <ins/memory/schemas.h>
 #include <ins/os/threading.h>
 
 namespace ins::mem {
 
-   struct MemoryContext;
-   struct MemorySharedContext;
-   struct MemoryCentralContext;
-
-   struct MemoryLocalSite {
-   private:
-      MemoryLocalSite** pprev;
-      MemoryLocalSite* next;
-      friend class MemoryCentralContext;
-      friend class MemoryContext;
-   public:
-      void* ptr;
-      MemoryLocalSite(void* ptr = 0);
-      ~MemoryLocalSite();
-   };
-
    struct MemoryContext : IMemoryConsumer {
-      MemoryCentralContext* heap;
       ObjectAllocOptions options;
+
+      uint16_t id = 0;
 
       std::mutex owning;
       ins::os::Thread thread;
-      MemoryLocalSite* locals = 0;
-      uint16_t id = 0;
+      uint8_t allocated : 1;
+      uint8_t isShared : 1;
 
       ObjectLocalContext unmanaged;
       ObjectLocalContext managed;
-
-      ObjectHeader NewPrivatedUnmanaged(size_t size);
-      ObjectHeader NewPrivatedManaged(size_t size);
-      ObjectHeader NewSharedUnmanaged(size_t size);
-      ObjectHeader NewSharedManaged(size_t size);
-      void FreeObject(address_t address);
-
-      void PerformMemoryCleanup();
-      void MarkUsedObject();
-      void CheckValidity();
 
       struct {
          MemoryContext* registered = none<MemoryContext>();
          MemoryContext* recovered = none<MemoryContext>();
       } next;
 
+
+      void* AllocateUnmanaged(ObjectSchemaID schema_id, size_t size);
+      void* AllocateManaged(ObjectSchemaID schema_id, size_t size);
+
+      void** NewHardReference(void* ptr);
+      void** NewWeakReference(void* ptr);
+
+      void PerformCleanup();
+      void CheckValidity();
+
    protected:
-      bool allocated = false;
-      bool isShared = false;
-      friend struct Descriptor;
-      friend struct MemoryController;
-      void Initiate(MemoryCentralContext* heap);
+      void Scavenge();
       void RescueStarvingSituation(size_t expectedByteLength) override;
    };
 
-   struct MemorySharedContext : protected MemoryContext {
-      MemorySharedContext() {
-         this->isShared = true;
-      }
+   struct MemorySharedContext {
+   private:
+      MemoryContext* shared = 0;
+   public:
+      void AcquireContext();
       void CheckValidity() {
-         std::lock_guard<std::mutex> guard(this->owning);
-         return this->MemoryContext::CheckValidity();
+         std::lock_guard<std::mutex> guard(this->shared->owning);
+         return this->shared->CheckValidity();
       }
-      ObjectHeader NewPrivatedUnmanaged(size_t size) {
-         std::lock_guard<std::mutex> guard(this->owning);
-         return this->MemoryContext::NewPrivatedUnmanaged(size);
+      void* AllocateUnmanaged(ObjectSchemaID schema_id, size_t size) {
+         std::lock_guard<std::mutex> guard(this->shared->owning);
+         return this->shared->AllocateUnmanaged(schema_id, size);
       }
-      ObjectHeader NewPrivatedManaged(size_t size) {
-         std::lock_guard<std::mutex> guard(this->owning);
-         return this->MemoryContext::NewPrivatedManaged(size);
+      void* AllocateManaged(ObjectSchemaID schema_id, size_t size) {
+         std::lock_guard<std::mutex> guard(this->shared->owning);
+         return this->shared->AllocateManaged(schema_id, size);
       }
-      ObjectHeader NewSharedUnmanaged(size_t size) {
-         std::lock_guard<std::mutex> guard(this->owning);
-         return this->MemoryContext::NewSharedUnmanaged(size);
+      void** NewHardReference(void* ptr) {
+         std::lock_guard<std::mutex> guard(this->shared->owning);
+         return this->shared->NewHardReference(ptr);
       }
-      ObjectHeader NewSharedManaged(size_t size) {
-         std::lock_guard<std::mutex> guard(this->owning);
-         return this->MemoryContext::NewSharedManaged(size);
+      void** NewWeakReference(void* ptr) {
+         std::lock_guard<std::mutex> guard(this->shared->owning);
+         return this->shared->NewWeakReference(ptr);
       }
-      void FreeObject(address_t address) {
-         std::lock_guard<std::mutex> guard(this->owning);
-         return this->MemoryContext::FreeObject(address);
-      }
-   protected:
-      friend struct Descriptor;
-      friend struct MemoryController;
    };
 
    struct MemoryCentralContext {
@@ -97,21 +72,40 @@ namespace ins::mem {
       ObjectCentralContext managed;
       ObjectAllocOptions options;
 
-      void Initiate();
+      void Initialize();
       void CheckValidity();
       void ForeachObjectRegion(std::function<bool(ObjectRegion)>&& visitor);
 
-      void PerformMemoryCleanup();
+      void PerformCleanup();
+
+      void InitiateContext(MemoryContext* context);
    };
 
-   struct ThreadDedicatedContext {
-      bool disposable;
-      ThreadDedicatedContext(MemoryContext* context = 0, bool disposable = false);
-      ~ThreadDedicatedContext();
-      MemoryContext& operator *();
-      MemoryContext* operator ->();
-      void Put(MemoryContext* context = 0, bool disposable = false);
-      MemoryContext* Pop();
-   };
+   // Context API
+   extern _declspec(thread) MemoryContext* CurrentContext;
+   extern MemorySharedContext* DefaultContext;
+   extern MemoryCentralContext* Central;
+   extern MemoryContext* GetThreadContext();
+   extern MemoryContext* SetThreadContext(MemoryContext* context);
 
+   // Object allocation API
+   extern void* AllocateObject(size_t size);
+   extern void* AllocateUnmanagedObject(ObjectSchemaID schemaID, size_t size);
+   extern void* AllocateManagedObject(ObjectSchemaID schemaID, size_t size);
+   extern void* AllocateUnmanagedObject(ObjectSchemaID schemaID);
+   extern void* AllocateManagedObject(ObjectSchemaID schemaID);
+
+   // Object retention API
+   extern void RetainObject(void* ptr);
+   extern bool ReleaseObject(void* ptr);
+   extern bool FreeObject(void* ptr);
+
+   // Weak object retention API
+   extern void RetainObjectWeak(void* ptr);
+   extern bool ReleaseObjectWeak(void* ptr);
+
+   // Managed object reference API
+   extern void** NewHardReference(void* ptr);
+   extern void** NewWeakReference(void* ptr);
+   extern void DeleteReference(void** ref);
 }

@@ -2,8 +2,8 @@
 namespace ins::mem::cst {
 
    const size_t ObjectLayoutMin  = 0;
-   const size_t ObjectLayoutMax = 77;
-   const size_t ObjectLayoutCount = 78;
+   const size_t ObjectLayoutMax = 71;
+   const size_t ObjectLayoutCount = 72;
 
    const size_t ObjectRegionTemplateCount = 12;
 

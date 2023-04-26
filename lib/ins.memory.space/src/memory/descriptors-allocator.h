@@ -184,10 +184,10 @@ namespace ins::mem {
             }
             return spanPtr;
          }
-         void FeedBlocksBucket(BlockDescriptorBucket& blocks) {
+         void FeedBlocksBucket(BlockDescriptorBucket& blocks, DescriptorsAllocator* allocator) {
             if (auto span = this->PullSpan(0)) {
                auto spanPtr = span->ptr;
-               os::CommitMemory(spanPtr, cst::PageSize);
+               allocator->CommitSpan(spanPtr, cst::PageSize);
                blocks.PushBlock(BlockDescriptor(spanPtr)->Reset(cst::PageSizeL2));
                this->SlicePageSpan(spanPtr, span->lengthL2, 0, blocks);
             }
@@ -198,13 +198,14 @@ namespace ins::mem {
       BlockDescriptorBucket blocks;
       PageSpanDescriptorBucket spans;
       uint32_t lengthL2 = 0; // length in pages count
+      size_t used_bytes = 0;
 
       DescriptorEntry Allocate(size_t sizeL2, size_t usedSizeL2 = 0) {
          std::lock_guard<std::mutex> guard(this->lock);
          if (sizeL2 < cst::PageSizeL2) {
             auto block = this->blocks.MakeBlock(sizeL2);
             if (!block) {
-               this->spans.FeedBlocksBucket(this->blocks);
+               this->spans.FeedBlocksBucket(this->blocks, this);
                block = this->blocks.MakeBlock(sizeL2);
             }
             _ASSERT(block);
@@ -215,7 +216,7 @@ namespace ins::mem {
             _ASSERT(usedSizeL2 >= cst::PageSizeL2);
             auto lengthL2 = sizeL2 - cst::PageSizeL2;
             auto spanPtr = this->spans.MakeSpan(lengthL2, this->blocks);
-            os::CommitMemory(spanPtr, size_t(1) << usedSizeL2);
+            this->CommitSpan(spanPtr, size_t(1) << usedSizeL2);
             auto entry = DescriptorEntry(spanPtr);
             entry->typeID = 0;
             entry->sizeL2 = sizeL2;
@@ -229,12 +230,12 @@ namespace ins::mem {
          }
          if (entry->usedSizeL2 <= usedSizeL2) {
             auto newSize = size_t(1) << usedSizeL2;
-            os::CommitMemory(uintptr_t(entry), newSize);
+            this->CommitSpan(uintptr_t(entry), newSize);
          }
          else {
             auto newSize = size_t(1) << usedSizeL2;
             auto prevSize = size_t(1) << entry->usedSizeL2;
-            os::DecommitMemory(uintptr_t(entry) + newSize, prevSize - newSize);
+            this->DecommitSpan(uintptr_t(entry) + newSize, prevSize - newSize);
          }
          entry->usedSizeL2 = usedSizeL2;
       }
@@ -245,13 +246,14 @@ namespace ins::mem {
             this->blocks.PushBlock(BlockDescriptor(entry)->Reset(sizeL2));
          }
          else {
-            os::DecommitMemory(uintptr_t(entry), size_t(1) << entry->usedSizeL2);
+            this->DecommitSpan(uintptr_t(entry), size_t(1) << entry->usedSizeL2);
             auto lengthL2 = sizeL2 - cst::PageSizeL2;
             auto span = PageSpanDescriptor(this->blocks.MakeBlock(6));
             this->spans.PushSpan(span->Reset(uintptr_t(entry), lengthL2));
          }
       }
-      void Initiate(uintptr_t base, uintptr_t offset, uint32_t arena_countL2) {
+      void Initialize(uintptr_t base, uintptr_t offset, uint32_t arena_countL2) {
+         this->used_bytes = cst::PageSize;
 
          // Register initiale block reserve
          _ASSERT(offset < cst::PageSize);
@@ -264,6 +266,14 @@ namespace ins::mem {
          this->spans.SlicePageSpan(uintptr_t(base), this->lengthL2, 0, blocks);
       }
    private:
+      void CommitSpan(uintptr_t ptr, size_t size) {
+         this->used_bytes += size;
+         os::CommitMemory(ptr, size);
+      }
+      void DecommitSpan(uintptr_t ptr, size_t size) {
+         this->used_bytes -= size;
+         os::DecommitMemory(ptr, size);
+      }
       static int32_t GetAvailableSizeL2(size_t sizeL2, uint32_t sizesMap) {
          auto bitmap = sizesMap & bit::umask_32(sizeL2);
          if (!bitmap) return -1;

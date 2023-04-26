@@ -1,7 +1,7 @@
 #pragma once
 #include <ins/memory/descriptors.h>
 #include <ins/memory/structs.h>
-#include <ins/memory/regions.h>
+#include <ins/memory/map.h>
 #include <ins/memory/config.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -10,8 +10,10 @@ namespace ins::mem {
 
    typedef struct sObjectHeader* ObjectHeader;
    typedef struct sObjectRegion* ObjectRegion;
+   typedef struct sObjectSchema* ObjectSchema;
    typedef uint8_t* ObjectBytes;
    struct ObjectLocalContext;
+   struct MemoryContext;
 
    enum ObjectLayoutPolicy {
       SmallObjectPolicy, // region with multiple objects
@@ -27,10 +29,11 @@ namespace ins::mem {
 
    // Object size fixed point divider: index = (uint64_t(position)*ObjectDividerFixed32[clsID]) >> 32 
    struct tObjectLayoutBase {
+      static constexpr uint8_t DividerShift = 35;
       uint32_t object_divider;
       uint32_t object_multiplier;
       uintptr_t GetObjectIndex(uintptr_t offset) const {
-         return ((offset - cst::ObjectRegionHeadSize) * object_divider) >> 16;
+         return (uint64_t(offset - cst::ObjectRegionHeadSize) * object_divider) >> DividerShift;
       }
       uintptr_t GetObjectOffset(uintptr_t index) const {
          return cst::ObjectRegionHeadSize + index * object_multiplier;
@@ -71,39 +74,39 @@ namespace ins::mem {
    struct sObjectHeader {
       static const uint64_t cZeroHeaderBits = 0;
       static const uint64_t cDeadHeaderBits = -1;
+      enum FLAGS : uint64_t {
+         SCHEMA_ID_MASK = 0xffffff,
+         CLUSTER_ID_MASK = 0xff000000,
+         HAS_ANALYTICS_INFOS = 0x0100000000,
+         HAS_SECURITY_PADDING = 0x0200000000,
+         HAS_LOCK = 0x0400000000,
+      };
       union {
          struct {
-            // Not thread protected bits (changed only on alloc/free, ie. when only one thread point to it)
-            uint32_t schemaID : 24;
-            uint32_t hasAnalyticsInfos : 1; // define that object is followed by analytics structure
-            uint32_t hasSecurityPadding : 1; // define that object is followed by a padding of security(canary)
-
-            // Thread protected bits
-            uint32_t retentionCounter : 8; // define how many times the object shall be dispose to be really deleted
-            uint32_t weakRetentionCounter : 6; // define how many times the object shall be unlocked before the memory is reusable
-            uint32_t lock : 1; // general multithread protection for this object
+            uint32_t schema_id; // see ObjectSchemaID
+            uint8_t cluster_id; // define the object cluster id, when 0 means object is not clustered
+            uint8_t has_analytics_infos : 1; // define that object is followed by analytics structure
+            uint8_t has_security_padding : 1; // define that object is followed by a padding of security(canary)
+            uint8_t lock : 1; // general multithread protection for this object
+            uint8_t hard_retention;
+            uint8_t weak_retention;
+         };
+         struct {
+            uint32_t __resv__0;
+            uint16_t __resv__1;
+            uint16_t retention;
          };
          uint64_t bits;
       };
       void* ptr() {
          return &this[1];
       }
+      bool IsDisposable() {
+         return this->retention == 0;
+      }
    };
    static_assert(sizeof(sObjectHeader) == sizeof(uint64_t), "bad size");
 
-   typedef struct sObjectMarks {
-      union {
-         struct {
-            uint32_t marks; // Bit[k]: block k is gc marked entries
-            uint32_t analyzis; // Bit[k]: block k is gc analyzed entries
-         };
-         uint64_t bits[1];
-      };
-      void Init() {
-         this->bits[0] = 0;
-      }
-   } *ObjectMarks;
-   static_assert(sizeof(sObjectMarks) == sizeof(uint64_t), "bad size");
 
    /**********************************************************************
    *
@@ -113,7 +116,6 @@ namespace ins::mem {
 
    struct sObjectRegion {
       uint8_t layoutID = 0; // Region layout class
-      uint8_t privated = 0; // Region owning, 1: private, 0: shared
       uint8_t notified_finalizers = 0; // Notified: object with pending finalize shall be check in gc state
       uint32_t width = 0; // Region size based on arena granularity metric
       ObjectLocalContext* owner = 0; // Region owner
@@ -134,8 +136,7 @@ namespace ins::mem {
       void Dispose();
 
       bool IsDisposable() {
-         auto bits = this->availables | this->notified_availables.load(std::memory_order_relaxed);
-         return bits == cst::ObjectLayoutMask[this->layoutID];
+         return this->GetAvailablesMap() == cst::ObjectLayoutMask[this->layoutID];
       }
 
       bool IsNotified() {
@@ -146,14 +147,16 @@ namespace ins::mem {
          return cst::ObjectLayoutInfos[this->layoutID].region_objects;
       }
 
+      uint64_t GetAvailablesMap() {
+         return this->availables | this->notified_availables.load(std::memory_order_relaxed);
+      }
+
       size_t GetAvailablesCount() {
-         auto bits = this->availables | this->notified_availables.load(std::memory_order_relaxed);
-         return bit::bitcount_64(bits);
+         return bit::bitcount_64(this->GetAvailablesMap());
       }
 
       size_t GetUsedCount() {
-         auto bits = this->availables | this->notified_availables.load(std::memory_order_relaxed);
-         bits ^= cst::ObjectLayoutMask[this->layoutID];
+         auto bits = this->GetAvailablesMap() ^ cst::ObjectLayoutMask[this->layoutID];
          return bit::bitcount_64(bits);
       }
 
@@ -162,12 +165,17 @@ namespace ins::mem {
          return bit::bitcount_64(bits);
       }
 
+      bool IsObjectAvailable(uint64_t object_bit) {
+         return (this->availables & object_bit ||
+            this->notified_availables.load(std::memory_order_relaxed) & object_bit);
+      }
+
       size_t GetObjectSize() {
          return cst::ObjectLayoutBase[this->layoutID].object_multiplier;
       }
 
       size_t GetRegionSize() {
-         auto regionID = mem::Regions.ArenaMap[address_t(this).arenaID].segmentation;
+         auto regionID = mem::ArenaMap[address_t(this).arenaID].segmentation;
          return size_t(this->width) << mem::cst::RegionSizingInfos[regionID].granularityL2;
       }
 
@@ -209,162 +217,18 @@ namespace ins::mem {
          auto& infos = cst::ObjectLayoutInfos[layoutID];
          this->width = size >> mem::cst::RegionSizingInfos[infos.region_sizeL2].granularityL2;
          this->availables = mem::cst::ObjectLayoutMask[layoutID];
-         _INS_DEBUG(printf("! new region: %p: object_size=%zu object_count=%d\n", this, infos.object_size, infos.object_count));
-
+         _INS_TRACE(printf("! new region: %p: object_size=%d object_count=%d\n", this, int(layoutID), int(infos.region_objects)));
       }
 
    };
 
    static_assert(sizeof(sObjectRegion) <= cst::ObjectRegionHeadSize, "bad size");
 
-   // Object Region List
-   struct ObjectRegionList {
-      ObjectRegion first = 0;
-      ObjectRegion last = 0;
-      uint32_t count = 0;
-      uint32_t limit = 0;
-
-      void Push(ObjectRegion region) {
-         region->next.used = 0;
-         if (!this->last) this->first = region;
-         else this->last->next.used = region;
-         this->last = region;
-         this->count++;
-      }
-      ObjectRegion Pop() {
-         if (auto region = this->first) {
-            this->first = region->next.used;
-            if (!this->first) this->last = 0;
-            this->count--;
-            region->next.used = none<sObjectRegion>();
-            return region;
-         }
-         return 0;
-      }
-      void DisposeAll() {
-         while (auto region = this->Pop()) {
-            region->Dispose();
-         }
-      }
-      void CollectDisposables(ObjectRegionList& disposables) {
-         ObjectRegion* pregion = &this->first;
-         ObjectRegion last = 0;
-         while (*pregion) {
-            auto region = *pregion;
-            if (region->IsDisposable()) {
-               *pregion = region->next.used;
-               this->count--;
-               disposables.Push(region);
-            }
-            else {
-               last = region;
-               pregion = &region->next.used;
-            }
-         }
-         this->last = last;
-      }
-      void DumpInto(ObjectRegionList& receiver, ObjectLocalContext* owner) {
-         if (this->first) {
-            for (ObjectRegion region = this->first; region; region = region->next.used) {
-               region->owner = owner;
-            }
-            if (receiver.last) {
-               receiver.last->next.used = this->first;
-               receiver.last = this->last;
-               receiver.count += this->count;
-            }
-            else {
-               receiver.first = this->first;
-               receiver.last = this->last;
-               receiver.count = this->count;
-            }
-            this->first = 0;
-            this->last = 0;
-            this->count = 0;
-         }
-      }
-      void CheckValidity() {
-         uint32_t c_count = 0;
-         for (auto x = this->first; x && c_count < 1000000; x = x->next.used) {
-            if (!x->next.used) _ASSERT(x == this->last);
-            c_count++;
-         }
-         _ASSERT(c_count == this->count);
-      }
-   };
-
-   // Object Notified Region List
-   struct ObjectRegionNotifieds {
-      std::atomic<uint64_t> list;
-      uint64_t Push(ObjectRegion region) {
-         _INS_DEBUG(printf("PushNotifiedRegion\n"));
-         _ASSERT(region->next.notified == none<sObjectRegion>());
-         for (;;) {
-            uint64_t current = this->list.load(std::memory_order_relaxed);
-            uint64_t count = current & 0xffff;
-            if (count < 1000) {
-               count++;
-            }
-            else {
-               //printf("Notified overflow\n");
-            }
-            uint64_t next = count | (uint64_t(region) << 16);
-            region->next.notified = ObjectRegion(current >> 16);
-            if (this->list.compare_exchange_weak(
-               current, next,
-               std::memory_order_release,
-               std::memory_order_relaxed
-            )) {
-               return count;
-            }
-         }
-      }
-      ObjectRegion Flush() {
-         uint64_t current = this->list.exchange(0);
-         return ObjectRegion(current >> 16);
-      }
-      size_t Count() {
-         uint64_t current = this->list.load(std::memory_order_relaxed);
-         return current & 0xffff;
-      }
-   };
-
    /**********************************************************************
    *
-   *   Object Analytics & Location
+   *   Object Location & Infos
    *
    ***********************************************************************/
-
-   struct ObjectAlivenessFlags {
-      std::atomic_uint64_t flags;
-   };
-
-   struct ObjectAlivenessItem {
-      uint16_t arenaID;
-      std::atomic<uint32_t> next;
-      std::atomic_uint64_t uncheckeds;
-   };
-
-   struct ObjectAnalysisSession {
-      uint32_t* arenaIndexesMap = 0;
-
-      ObjectAlivenessFlags* regionAlivenessMap = 0;
-      ObjectAlivenessItem* regionItemsMap = 0;
-
-      std::atomic<uint32_t> notifieds = 0;
-
-      uint32_t allocated = 0;
-      uint32_t length = 0;
-
-      bool SetAlive(uint16_t arenaID, uint32_t regionIndex, uint64_t objectBit);
-      void Postpone(uint16_t arenaID, uint32_t regionIndex, uint64_t objectBit);
-      void Reset();
-      void RunOnce();
-      static void MarkPtr(void* ptr);
-
-      static std::mutex running;
-      static ObjectAnalysisSession* enabled;
-   };
 
    struct ObjectAnalyticsInfos {
       uint64_t stackstamp;
@@ -383,15 +247,31 @@ namespace ins::mem {
       ObjectRegion region;
       RegionLayoutID layout;
       uint32_t index;
+
+      bool IsAlive();
+      bool IsAllocated();
+
+      void Retain();
+      void RetainWeak();
+
+      bool ReleaseWeak(MemoryContext* context);
+      bool Release(MemoryContext* context);
+      bool Free(MemoryContext* context);
+
       ObjectLocation(address_t address) {
-         this->arena = mem::Regions.ArenaMap[address.arenaID];
+         this->arena = mem::ArenaMap[address.arenaID];
          this->layout = this->arena.layout(address.position >> this->arena.segmentation);
          if (this->layout.IsObjectRegion()) {
             auto& infos = mem::cst::ObjectLayoutBase[this->layout];
             auto offset = address.position & mem::cst::RegionMasks[this->arena.segmentation];
-            this->index = infos.GetObjectIndex(offset);
             this->region = ObjectRegion(address.ptr - offset);
-            this->object = ObjectHeader(uintptr_t(region) + infos.GetObjectOffset(this->index));
+            this->index = infos.GetObjectIndex(offset);
+            if (this->index < cst::ObjectLayoutInfos[this->layout].region_objects) {
+               this->object = ObjectHeader(uintptr_t(region) + infos.GetObjectOffset(this->index));
+            }
+            else {
+               this->object = 0;
+            }
          }
          else {
             this->region = 0;
@@ -405,19 +285,19 @@ namespace ins::mem {
       ObjectInfos(address_t address)
          : ObjectLocation(address) {
       }
-      size_t allocated_size() {
+      size_t GetAllocatedSize() {
          if (this->object) {
             return this->region->GetObjectSize();
          }
          return 0;
       }
-      size_t usable_size() {
+      size_t GetUsableSize() {
          if (this->object) {
             auto size = this->region->GetObjectSize();
-            if (this->object->hasAnalyticsInfos) {
+            if (this->object->has_analytics_infos) {
                size -= sizeof(ObjectAnalyticsInfos);
             }
-            if (this->object->hasSecurityPadding) {
+            if (this->object->has_security_padding) {
                auto paddingEnd = size - sizeof(uint32_t);
                auto pBufferSize = (uint32_t*)&ObjectBytes(object)[paddingEnd];
                uint32_t bufferSize = (*pBufferSize) ^ 0xabababab;
@@ -427,18 +307,18 @@ namespace ins::mem {
          }
          return 0;
       }
-      ObjectAnalyticsInfos* getAnalyticsInfos() {
-         if (this->object && this->object->hasAnalyticsInfos) {
+      ObjectAnalyticsInfos* GetAnalyticsInfos() {
+         if (this->object && this->object->has_analytics_infos) {
             auto size = this->region->GetObjectSize();
             auto pinfos = &ObjectBytes(object)[size - sizeof(ObjectAnalyticsInfos)];
             return (ObjectAnalyticsInfos*)pinfos;
          }
          return 0;
       }
-      void* detectOverflowedBytes() {
-         if (this->object && this->object->hasSecurityPadding) {
+      void* DetectOverflowedBytes() {
+         if (this->object && this->object->has_security_padding) {
             auto size = this->region->GetObjectSize();
-            if (this->object->hasAnalyticsInfos) {
+            if (this->object->has_analytics_infos) {
                size -= sizeof(ObjectAnalyticsInfos);
             }
 
@@ -467,14 +347,6 @@ namespace ins::mem {
    *   Functions
    *
    ***********************************************************************/
-
-   inline uint16_t getBlockDivider(uintptr_t block_size) {
-      return ((uint64_t(1) << 16) + block_size - 1) / block_size;
-   }
-
-   inline uintptr_t applyBlockDivider(uint16_t divider, uintptr_t value) {
-      return (uint64_t(value) * uint64_t(divider)) >> 16;
-   }
 
    inline uint8_t getLayoutForSize(size_t size) {
       if (size < cst::SmallSizeLimit) {

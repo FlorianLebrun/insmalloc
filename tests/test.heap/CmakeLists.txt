@@ -3,7 +3,8 @@ set(target "test-ins.memory.heap")
 append_group_sources(files FILTER "*.c|*.cpp|*.h|*.hpp" DIRECTORIES "./")
 
 add_executable(${target} WIN32 ${files})
-set_target_properties(${target} PROPERTIES FOLDER "Tests")
+
+target_compile_definitions(${target} PRIVATE $<$<CONFIG:Release>:/O2 /Ob2 /Oi /Ot /Oy /GT /GL /GS- /guard:cf>)
 
 target_link_libraries(${target} PRIVATE mimalloc-static ins.memory.heap ins.memory.hooks)
 target_link_options(${target} PRIVATE /SUBSYSTEM:CONSOLE)

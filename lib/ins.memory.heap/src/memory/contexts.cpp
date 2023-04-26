@@ -1,179 +1,18 @@
 #include <ins/memory/contexts.h>
 #include <ins/memory/schemas.h>
-#include <ins/memory/space.h>
-#include <ins/memory/objects-refs.h>
+#include <ins/memory/controller.h>
 #include <ins/memory/controller.h>
 #include <ins/os/threading.h>
-#include <ins/timing.h>
 
 using namespace ins;
 using namespace ins::mem;
 
-namespace ins::mem {
-   _declspec(thread) MemoryContext* context = 0;
-}
+mem::MemoryCentralContext* mem::Central = 0;
+mem::MemorySharedContext* mem::DefaultContext = 0;
+_declspec(thread) MemoryContext* mem::CurrentContext = 0;
 
-mem::MemoryLocalSite::MemoryLocalSite(void* ptr) : ptr(ptr) {
-   auto ctx = mem::context;
-   this->pprev = &ctx->locals;
-   this->next = ctx->locals;
-   ctx->locals = this;
-}
-
-mem::MemoryLocalSite::~MemoryLocalSite() {
-   this->pprev[0] = this->next;
-}
-
-ThreadDedicatedContext::ThreadDedicatedContext(MemoryContext* context, bool disposable) {
-   this->Put(context, disposable);
-}
-
-ThreadDedicatedContext::~ThreadDedicatedContext() {
-   bool disposable = this->disposable;
-   auto context = this->Pop();
-   if (context && disposable) {
-      mem::Controller.DisposeContext(context);
-   }
-}
-
-MemoryContext& ThreadDedicatedContext::operator *() {
-   return *mem::context;
-}
-
-MemoryContext* ThreadDedicatedContext::operator ->() {
-   return mem::context;
-}
-
-void ThreadDedicatedContext::Put(MemoryContext* context, bool disposable) {
-   if (mem::context) throw "previous context shall be released";
-   if (!context) {
-      context = mem::Controller.AcquireContext();
-      this->disposable = true;
-   }
-   else {
-      this->disposable = disposable;
-   }
-   if (!context->owning.try_lock()) {
-      throw "context already owned";
-   }
-   context->thread = os::Thread::current();
-   mem::context = context;
-}
-
-MemoryContext* ThreadDedicatedContext::Pop() {
-   auto context = mem::context;
-   if (context) {
-      context->thread.Clear();
-      mem::context->owning.unlock();
-      mem::context = 0;
-   }
-   return context;
-}
-
-MemoryContext* ins_get_thread_context() {
-   return mem::context;
-}
-
-void* ins_malloc(size_t size) {
-   if (auto context = mem::context) return context->NewPrivatedUnmanaged(size + sizeof(sObjectHeader));
-   else return mem::Controller.defaultContext->NewPrivatedUnmanaged(size + sizeof(sObjectHeader));
-}
-
-void ins_free(void* ptr) {
-   if (auto context = mem::context) return context->FreeObject(ptr);
-   else return mem::Controller.defaultContext->FreeObject(ptr);
-}
-
-ObjectHeader ins_new(size_t size) {
-   if (auto context = mem::context) return context->NewPrivatedUnmanaged(size);
-   else return mem::Controller.defaultContext->NewPrivatedUnmanaged(size);
-}
-
-mem::ObjectHeader ins_new_unmanaged(mem::SchemaID schemaID) {
-   ObjectHeader obj;
-   auto desc = mem::schemasHeap.GetSchemaDesc(schemaID);
-   if (auto context = mem::context) obj = context->NewPrivatedUnmanaged(desc->base_size);
-   else obj = mem::Controller.defaultContext->NewPrivatedUnmanaged(desc->base_size);
-   obj->schemaID = schemaID;
-   return obj;
-}
-
-mem::ObjectHeader ins_new_managed(mem::SchemaID schemaID) {
-   ObjectHeader obj;
-   auto desc = mem::schemasHeap.GetSchemaDesc(schemaID);
-   if (auto context = mem::context) obj = context->NewPrivatedManaged(desc->base_size);
-   else obj = mem::Controller.defaultContext->NewPrivatedManaged(desc->base_size);
-   if (auto session = ObjectAnalysisSession::enabled) {
-      session->MarkPtr(obj);
-   }
-   obj->schemaID = schemaID; // note: mark before schema setup
-   return obj;
-}
-
-void ins_delete(ObjectHeader obj) {
-   if (auto context = mem::context) return context->FreeObject(obj);
-   else return mem::Controller.defaultContext->FreeObject(obj);
-}
-
-void* ins_calloc(size_t count, size_t size) {
-   return malloc(count * size);
-}
-
-bool ins_check_overflow(void* ptr) {
-   ObjectInfos infos(ptr);
-   return infos.detectOverflowedBytes() == 0;
-}
-
-bool ins_get_metadata(void* ptr, mem::ObjectAnalyticsInfos& meta) {
-   ObjectInfos infos(ptr);
-   if (auto pmeta = infos.getAnalyticsInfos()) {
-      meta = *pmeta;
-      return true;
-   }
-   return false;
-}
-
-size_t ins_msize(void* ptr, tp_ins_msize default_msize) {
-   ObjectInfos infos(ptr);
-   if (infos.object) {
-      return infos.usable_size();
-   }
-   else if (default_msize) {
-      return default_msize(ptr);
-   }
-   return 0;
-}
-
-void* ins_realloc(void* ptr, size_t size, tp_ins_realloc default_realloc) {
-   ObjectInfos infos(ptr);
-   if (infos.object) {
-      if (size == 0) {
-         ins_free(ptr);
-         return 0;
-      }
-      else if (size > infos.usable_size()) {
-         void* new_ptr = ins_malloc(size);
-         memcpy(new_ptr, ptr, infos.usable_size());
-         ins_free(ptr);
-         return new_ptr;
-      }
-      else {
-         return ptr;
-      }
-   }
-   else {
-      if (default_realloc) {
-         return default_realloc(ptr, size);
-      }
-      else {
-         void* new_ptr = ins_malloc(size);
-         __try { memcpy(new_ptr, ptr, size); }
-         __except (1) {}
-         printf("sat cannot realloc unkown buffer\n");
-         return new_ptr;
-      }
-   }
-   return 0;
+void mem::MemorySharedContext::AcquireContext() {
+   this->shared = mem::AcquireContext(true);
 }
 
 /**********************************************************************
@@ -182,18 +21,18 @@ void* ins_realloc(void* ptr, size_t size, tp_ins_realloc default_realloc) {
 *
 ***********************************************************************/
 
-void MemoryCentralContext::Initiate() {
-   this->unmanaged.Initiate(false);
-   this->managed.Initiate(true);
+void mem::MemoryCentralContext::Initialize() {
+   this->unmanaged.Initialize(false);
+   this->managed.Initialize(true);
 }
 
-void MemoryCentralContext::CheckValidity() {
+void mem::MemoryCentralContext::CheckValidity() {
    this->unmanaged.CheckValidity();
    this->managed.CheckValidity();
 }
 
-void MemoryCentralContext::ForeachObjectRegion(std::function<bool(ObjectRegion)>&& visitor) {
-   mem::Regions.ForeachRegion(
+void mem::MemoryCentralContext::ForeachObjectRegion(std::function<bool(ObjectRegion)>&& visitor) {
+   mem::ForeachRegion(
       [&](ArenaDescriptor* arena, RegionLayoutID layout, address_t addr) {
          if (layout.IsObjectRegion()) {
             return visitor(ObjectRegion(addr.ptr));
@@ -203,119 +42,14 @@ void MemoryCentralContext::ForeachObjectRegion(std::function<bool(ObjectRegion)>
    );
 }
 
-void mem::MemoryCentralContext::PerformMemoryCleanup() {
+void mem::MemoryCentralContext::PerformCleanup() {
    this->unmanaged.Clean();
    this->managed.Clean();
 }
 
-/**********************************************************************
-*
-*   ObjectLocalContext
-*
-***********************************************************************/
-
-void ObjectLocalContext::LocalObjects::RemoveActiveRegion() {
-   if (this->active_region) {
-      auto region = this->active_region;
-      this->active_region = 0;
-      this->usables.Push(region);
-   }
-}
-
-void ObjectLocalContext::Initiate(MemoryContext* context, ObjectCentralContext* heap) {
-   this->managed = heap->managed;
-   this->context = context;
-   this->heap = heap;
-}
-
-void ObjectLocalContext::Clean() {
-   for (int layoutID = 0; layoutID < cst::ObjectLayoutCount; layoutID++) {
-      auto& privated = this->privateds[layoutID];
-      auto& shared = this->shareds[layoutID];
-      auto& central = this->heap->objects[layoutID];
-
-      // Scavenge owned regions before dump
-      this->ScavengeNotifiedRegions(layoutID);
-
-      // Clean usables regions
-      privated.RemoveActiveRegion();
-      privated.usables.CollectDisposables(this->disposables[layoutID]);
-      shared.RemoveActiveRegion();
-      shared.usables.CollectDisposables(this->disposables[layoutID]);
-
-      // Dump all not full to central pool
-      std::lock_guard<std::mutex> guard(central.lock);
-      privated.usables.DumpInto(central.usables, 0);
-      shared.usables.DumpInto(central.usables, 0);
-      this->disposables[layoutID].DumpInto(central.disposables, 0);
-   }
-}
-
-ObjectHeader ObjectLocalContext::AllocatePrivatedObject(size_t size) {
-   auto objectLayoutID = getLayoutForSize(size);
-   _ASSERT(size <= mem::cst::ObjectLayoutBase[objectLayoutID].object_multiplier);
-   if (objectLayoutID < cst::ObjectLayoutMax) {
-      return this->AcquirePrivatedObject(objectLayoutID);
-   }
-   else {
-      return this->AllocateLargeObject(size, true);
-   }
-}
-
-ObjectHeader ObjectLocalContext::AllocateSharedObject(size_t size) {
-   auto objectLayoutID = getLayoutForSize(size);
-   _ASSERT(size <= mem::cst::ObjectLayoutBase[objectLayoutID].object_multiplier);
-   if (objectLayoutID < cst::ObjectLayoutMax) {
-      return this->AcquireSharedObject(objectLayoutID);
-   }
-   else {
-      return this->AllocateLargeObject(size, false);
-   }
-}
-
-ObjectHeader ObjectLocalContext::AllocateLargeObject(size_t size, bool privated) {
-   auto region = sObjectRegion::New(this->managed, cst::ObjectLayoutMax, size, this);
-   auto obj = region->GetObjectAt(0);
-   region->privated = privated;
-   return obj;
-}
-
-ObjectHeader ObjectLocalContext::AllocateInstrumentedObject(size_t size, bool privated, ObjectAllocOptions options) {
-   size_t requiredSize = size + options.enableSecurityPadding;
-   if (options.enableAnalytics) requiredSize += sizeof(ObjectAnalyticsInfos);
-   auto objectLayoutID = getLayoutForSize(requiredSize);
-
-   // Allocate memory
-   ObjectHeader obj = 0;
-   if (objectLayoutID < cst::ObjectLayoutMax) {
-      if (privated) obj = this->AcquirePrivatedObject(objectLayoutID);
-      else obj = this->AcquireSharedObject(objectLayoutID);
-   }
-   else {
-      obj = this->AllocateLargeObject(size, privated);
-   }
-
-   // Configure analytics infos
-   uint32_t bufferLen = mem::cst::ObjectLayoutBase[objectLayoutID].object_multiplier;
-   if (options.enableAnalytics) {
-      bufferLen -= sizeof(ObjectAnalyticsInfos);
-      auto infos = (ObjectAnalyticsInfos*)&ObjectBytes(obj)[bufferLen];
-      infos->timestamp = timing::getCurrentTimestamp();
-      infos->stackstamp = 42;
-      obj->hasAnalyticsInfos = 1;
-   }
-
-   // Configure security padding
-   if (options.enableSecurityPadding) {
-      uint8_t* paddingBytes = &ObjectBytes(obj)[size];
-      uint32_t paddingLen = bufferLen - size - sizeof(uint32_t);
-      uint32_t& paddingTag = (uint32_t&)paddingBytes[paddingLen];
-      paddingTag = size ^ 0xabababab;
-      memset(paddingBytes, 0xab, paddingLen);
-      obj->hasSecurityPadding = 1;
-   }
-
-   return obj;
+void mem::MemoryCentralContext::InitiateContext(MemoryContext* context) {
+   context->unmanaged.Initialize(context, &this->unmanaged);
+   context->managed.Initialize(context, &this->managed);
 }
 
 /**********************************************************************
@@ -324,132 +58,142 @@ ObjectHeader ObjectLocalContext::AllocateInstrumentedObject(size_t size, bool pr
 *
 ***********************************************************************/
 
-void MemoryContext::Initiate(MemoryCentralContext* heap) {
-   this->heap = heap;
-   this->unmanaged.Initiate(this, &heap->unmanaged);
-   this->managed.Initiate(this, &heap->managed);
-}
-
-void MemoryContext::RescueStarvingSituation(size_t expectedByteLength) {
+void mem::MemoryContext::RescueStarvingSituation(size_t expectedByteLength) {
    mem::StarvedConsumerToken token;
    token.expectedByteLength = expectedByteLength;
-   token.context = context;
-   mem::Controller.RescueStarvedConsumer(token);
+   token.context = mem::CurrentContext;
+   mem::RescueStarvedConsumer(token);
 }
 
-void MemoryContext::CheckValidity() {
+void mem::MemoryContext::CheckValidity() {
    //this->unmanaged.CheckValidity();
    //this->managed.CheckValidity();
 }
 
-void MemoryContext::MarkUsedObject() {
-   for (auto loc = this->locals; loc; loc = loc->next) {
-      ObjectAnalysisSession::enabled->MarkPtr(loc->ptr);
-   }
+void* mem::MemoryContext::AllocateUnmanaged(ObjectSchemaID schema_id, size_t size) {
+   ObjectHeader obj;
+   size += sizeof(sObjectHeader);
+   if (!options.enableds) obj = this->unmanaged.AllocateObject(size);
+   else obj = this->unmanaged.AllocateInstrumentedObject(size, this->options);
+   obj->schema_id = schema_id;
+   return &obj[1];
 }
 
-ObjectHeader MemoryContext::NewPrivatedUnmanaged(size_t size) {
-   if (!options.enableds) {
-      return this->unmanaged.AllocatePrivatedObject(size);
+void* mem::MemoryContext::AllocateManaged(ObjectSchemaID schema_id, size_t size) {
+   ObjectHeader obj;
+   size += sizeof(sObjectHeader);
+   if (!options.enableds) obj = this->managed.AllocateObject(size);
+   else obj = this->managed.AllocateInstrumentedObject(size, this->options);
+   obj->schema_id = schema_id;
+   if (auto session = ObjectAnalysisSession::enabled) {
+      session->MarkPtr(obj);
    }
-   else {
-      return this->unmanaged.AllocateInstrumentedObject(size, true, this->options);
-   }
+   return &obj[1];
 }
 
-ObjectHeader MemoryContext::NewPrivatedManaged(size_t size) {
-   if (!options.enableds) {
-      return this->managed.AllocatePrivatedObject(size);
-   }
-   else {
-      return this->managed.AllocateInstrumentedObject(size, true, this->options);
-   }
+void** mem::MemoryContext::NewHardReference(void* ptr) {
+   return 0;
 }
 
-ObjectHeader MemoryContext::NewSharedUnmanaged(size_t size) {
-   if (!options.enableds) {
-      return this->unmanaged.AllocateSharedObject(size);
-   }
-   else {
-      return this->unmanaged.AllocateInstrumentedObject(size, false, this->options);
-   }
+void** mem::MemoryContext::NewWeakReference(void* ptr) {
+   return 0;
 }
 
-ObjectHeader MemoryContext::NewSharedManaged(size_t size) {
-   if (!options.enableds) {
-      return this->managed.AllocateSharedObject(size);
-   }
-   else {
-      return this->managed.AllocateInstrumentedObject(size, false, this->options);
-   }
+void mem::MemoryContext::Scavenge() {
+   printf("> Scavenge context %d [%s]\n", this->id, this->isShared ? "shared" : "private");
+   this->unmanaged.Scavenge();
+   this->managed.Scavenge();
 }
 
-
-void MemoryContext::FreeObject(address_t address) {
-   ObjectLocation location(address);
-   if (location.object) {
-      auto region = ObjectRegion(location.region);
-      auto owner = location.arena.managed ? &this->managed : &this->unmanaged;
-
-      // Check object is not available
-      auto object_bit = uint64_t(1) << location.index;
-      if (region->availables & object_bit ||
-         region->notified_availables.load(std::memory_order_relaxed) & object_bit)
-      {
-         throw "Cannot free not allocated object";
-      }
-
-      // Release object to region owner
-      if (region->owner == owner) {
-         if (region->availables == 0) {
-            owner->PushUsableRegion(region);
-         }
-         region->availables |= object_bit;
-         _ASSERT(region->availables != 0);
-      }
-      else {
-         if (region->notified_availables.fetch_or(object_bit) == 0) {
-            if (region->owner) {
-               if (region->privated) {
-                  auto count = region->owner->privateds[region->layoutID].notifieds.Push(region);
-                  if (count > 10) {
-                     mem::Controller.ScheduleContextRecovery(region->owner->context);
-                  }
-               }
-               else {
-                  auto count = region->owner->shareds[region->layoutID].notifieds.Push(region);
-                  if (count > 10) {
-                     mem::Controller.ScheduleContextRecovery(region->owner->context);
-                  }
-               }
-            }
-            else {
-               auto list = location.arena.managed ? mem::Controller.central.managed.objects : mem::Controller.central.unmanaged.objects;
-               list[region->layoutID].notifieds.Push(region);
-            }
-         }
-      }
-   }
-}
-
-void MemoryContext::PerformMemoryCleanup() {
-
-   auto PerformCleanup = [this]() {
-      printf("Clean context\n");
-      this->unmanaged.Clean();
-      this->managed.Clean();
-   };
-
+void mem::MemoryContext::PerformCleanup() {
    if (this->thread.IsCurrent()) {
-      PerformCleanup();
+      this->Scavenge();
    }
    else if (this->owning.try_lock()) {
       std::lock_guard<std::mutex> guard(this->owning, std::adopt_lock);
-      PerformCleanup();
+      this->Scavenge();
    }
    else if (this->thread) {
       this->thread.Suspend();
-      PerformCleanup();
+      this->Scavenge();
       this->thread.Resume();
    }
+}
+
+/**********************************************************************
+*
+*   MemoryContext
+*
+***********************************************************************/
+
+MemoryContext* mem::GetThreadContext() {
+   return mem::CurrentContext;
+}
+
+MemoryContext* mem::SetThreadContext(MemoryContext* context) {
+   auto prev = mem::CurrentContext;
+   mem::CurrentContext = context;
+   return prev;
+}
+
+void* mem::AllocateObject(size_t size) {
+   if (auto context = mem::CurrentContext) return context->AllocateUnmanaged(0, size);
+   else return mem::DefaultContext->AllocateUnmanaged(0, size);
+}
+
+void* mem::AllocateUnmanagedObject(ObjectSchemaID schemaID, size_t size) {
+   if (auto context = mem::CurrentContext) return context->AllocateUnmanaged(schemaID, size);
+   else return mem::DefaultContext->AllocateUnmanaged(schemaID, size);
+}
+
+void* mem::AllocateManagedObject(ObjectSchemaID schemaID, size_t size) {
+   if (auto context = mem::CurrentContext) return context->AllocateManaged(schemaID, size);
+   else return mem::DefaultContext->AllocateManaged(schemaID, size);
+}
+
+void* mem::AllocateUnmanagedObject(ObjectSchemaID schemaID) {
+   auto schema = mem::GetObjectSchema(schemaID);
+   if (auto context = mem::CurrentContext) return context->AllocateUnmanaged(schemaID, schema->base_size);
+   else return mem::DefaultContext->AllocateUnmanaged(schemaID, schema->base_size);
+}
+
+void* mem::AllocateManagedObject(ObjectSchemaID schemaID) {
+   auto schema = mem::GetObjectSchema(schemaID);
+   if (auto context = mem::CurrentContext) return context->AllocateManaged(schemaID, schema->base_size);
+   else return mem::DefaultContext->AllocateManaged(schemaID, schema->base_size);
+}
+
+void mem::RetainObject(void* ptr) {
+   ObjectLocation(ptr).Retain();
+}
+
+void mem::RetainObjectWeak(void* ptr) {
+   ObjectLocation(ptr).RetainWeak();
+}
+
+bool mem::ReleaseObject(void* ptr) {
+   return ObjectLocation(ptr).Release(mem::CurrentContext);
+}
+
+bool mem::ReleaseObjectWeak(void* ptr) {
+   return ObjectLocation(ptr).ReleaseWeak(mem::CurrentContext);
+}
+
+bool mem::FreeObject(void* ptr) {
+   return ObjectLocation(ptr).Free(mem::CurrentContext);
+}
+
+
+void** mem::NewHardReference(void* ptr) {
+   if (auto context = mem::CurrentContext) return context->NewHardReference(ptr);
+   else return mem::DefaultContext->NewHardReference(ptr);
+}
+
+void** mem::NewWeakReference(void* ptr) {
+   if (auto context = mem::CurrentContext) return context->NewWeakReference(ptr);
+   else return mem::DefaultContext->NewWeakReference(ptr);
+}
+
+void mem::DeleteReference(void** ref) {
+   throw "TODO";
 }

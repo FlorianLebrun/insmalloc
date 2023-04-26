@@ -1,10 +1,18 @@
-#include <ins/memory/objects-refs.h>
-#include <ins/memory/space.h>
+#include <ins/memory/descriptors.h>
+#include <ins/memory/controller.h>
+#include <ins/timing.h>
+#include <mutex>
+#include <thread>
+#include <iostream>
+#include <condition_variable>
 
 using namespace ins;
 using namespace ins::mem;
 
-struct DeepMarkerContext : TraversalContext<SchemaDesc, uint8_t> {
+std::mutex mem::ObjectAnalysisSession::running;
+ObjectAnalysisSession* mem::ObjectAnalysisSession::enabled = 0;
+
+struct DeepMarkerContext : TraversalContext<sObjectSchema, uint8_t> {
    ObjectAnalysisSession* session;
    uint32_t depth;
    DeepMarkerContext(ObjectAnalysisSession* session, uint32_t depth) : session(session), depth(depth) {
@@ -12,16 +20,16 @@ struct DeepMarkerContext : TraversalContext<SchemaDesc, uint8_t> {
    }
    void Traverse(ObjectHeader obj) {
       _ASSERT(this->depth > 0);
-      if (obj->schemaID) {
+      if (obj->schema_id) {
          this->depth--;
          this->data = (uint8_t*)&obj[1];
-         this->schema = mem::schemasHeap.GetSchemaDesc(obj->schemaID);
+         this->schema = mem::GetObjectSchema(obj->schema_id);
          this->schema->traverser((TraversalContext<>*)this);
          this->depth++;
       }
    }
    void Mark(address_t address) {
-      auto entry = mem::Regions.ArenaMap[address.arenaID];
+      auto entry = mem::ArenaMap[address.arenaID];
       if (entry.managed) {
          auto regionIndex = address.position >> entry.segmentation;
          auto regionLayout = entry.layout(regionIndex);
@@ -30,7 +38,7 @@ struct DeepMarkerContext : TraversalContext<SchemaDesc, uint8_t> {
             auto offset = address.position & mem::cst::RegionMasks[entry.segmentation];
             auto objectIndex = infos.GetObjectIndex(offset);
             auto objectBit = uint64_t(1) << objectIndex;
-            if (session->SetAlive(address.arenaID, regionIndex, objectBit)) {
+            if (session->MarkAlive(address.arenaID, regionIndex, objectBit)) {
                if (this->depth == 0) {
                   this->session->Postpone(address.arenaID, regionIndex, objectBit);
                }
@@ -47,13 +55,13 @@ struct DeepMarkerContext : TraversalContext<SchemaDesc, uint8_t> {
    }
 };
 
-__forceinline bool ObjectAnalysisSession::SetAlive(uint16_t arenaID, uint32_t regionIndex, uint64_t objectBit) {
+__declspec(noinline) bool mem::ObjectAnalysisSession::MarkAlive(uint16_t arenaID, uint32_t regionIndex, uint64_t objectBit) {
    auto index = this->arenaIndexesMap[arenaID] + regionIndex;
    auto prev = this->regionAlivenessMap[index].flags.fetch_or(objectBit);
    return (prev & objectBit) == 0;
 }
 
-void ObjectAnalysisSession::Postpone(uint16_t arenaID, uint32_t regionIndex, uint64_t objectBit) {
+void mem::ObjectAnalysisSession::Postpone(uint16_t arenaID, uint32_t regionIndex, uint64_t objectBit) {
    auto index = this->arenaIndexesMap[arenaID] + regionIndex;
    auto item = &this->regionItemsMap[index];
    auto prev = item->uncheckeds.fetch_or(objectBit);
@@ -73,17 +81,17 @@ void ObjectAnalysisSession::Postpone(uint16_t arenaID, uint32_t regionIndex, uin
    }
 }
 
-void ObjectAnalysisSession::MarkPtr(void* target) {
+void mem::ObjectAnalysisSession::MarkPtr(void* target) {
    DeepMarkerContext(ObjectAnalysisSession::enabled, 1).Mark(target);
 }
 
-void ObjectAnalysisSession::Reset() {
+void mem::ObjectAnalysisSession::Reset() {
    uint32_t count = 1; // start at 1 because 0 is the reserved null index
    if (!this->arenaIndexesMap) {
       this->arenaIndexesMap = (uint32_t*)malloc(sizeof(uint32_t) * cst::ArenaPerSpace);
    }
    for (int i = 0; i < cst::ArenaPerSpace; i++) {
-      auto& entry = mem::Regions.ArenaMap[i];
+      auto& entry = mem::ArenaMap[i];
       this->arenaIndexesMap[i] = count;
       if (entry.managed) {
          auto arena = entry.descriptor();
@@ -104,7 +112,7 @@ void ObjectAnalysisSession::Reset() {
    this->length = count;
 }
 
-void ObjectAnalysisSession::RunOnce() {
+void mem::ObjectAnalysisSession::RunOnce() {
    while (auto workIndex = this->notifieds.exchange(0)) {
       uint32_t nextIndex = 0;
       do {
@@ -114,7 +122,7 @@ void ObjectAnalysisSession::RunOnce() {
          item.next = 0;
 
          // Treat uncheckeds objects
-         auto entry = mem::Regions.ArenaMap[item.arenaID];
+         auto entry = mem::ArenaMap[item.arenaID];
          auto regionIndex = workIndex - this->arenaIndexesMap[item.arenaID];
          auto regionLayout = cst::ObjectLayoutBase[entry.layout(regionIndex)];
          auto regionBase = (uintptr_t(item.arenaID) << cst::ArenaSizeL2) + (uintptr_t(regionIndex) << entry.segmentation) + cst::ObjectRegionHeadSize;

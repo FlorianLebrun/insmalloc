@@ -1,5 +1,5 @@
 #include <ins/memory/descriptors.h>
-#include <ins/memory/regions.h>
+#include <ins/memory/map.h>
 #include <ins/os/memory.h>
 #include "./descriptors-allocator.h"
 #include "./regions-allocator.h"

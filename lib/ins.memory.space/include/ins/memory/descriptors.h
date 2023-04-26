@@ -69,4 +69,6 @@ namespace ins::mem {
    protected:
       static BufferBytes AllocateDescriptor(size_t size, size_t usedSize = 0);
    };
+
+   extern size_t GetDescriptorHeapUsedBytes();
 }
