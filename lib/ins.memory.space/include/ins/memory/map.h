@@ -117,6 +117,9 @@ namespace ins::mem {
       RegionLayoutID& layout(size_t regionIndex) {
          return ((ArenaDescriptor*)this->reference)->regions[regionIndex];
       }
+      ArenaDescriptor* operator -> () {
+         return (ArenaDescriptor*)this->reference;
+      }
       operator bool() {
          return this->bits != 0;
       }

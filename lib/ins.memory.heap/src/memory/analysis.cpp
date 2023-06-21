@@ -9,7 +9,6 @@
 using namespace ins;
 using namespace ins::mem;
 
-std::mutex mem::ObjectAnalysisSession::running;
 ObjectAnalysisSession* mem::ObjectAnalysisSession::enabled = 0;
 
 struct DeepMarkerContext : TraversalContext<sObjectSchema, uint8_t> {
@@ -136,4 +135,35 @@ void mem::ObjectAnalysisSession::RunOnce() {
 
       } while (workIndex = nextIndex);
    }
+}
+
+void mem::ObjectMemoryCollection::iterator::move() {
+   // Move to next region when end reach
+   while (this->regionObjects == 0) {
+      this->regionIndex++;
+
+      // Move to next arena when end reach
+      while (this->regionIndex >= this->regionCount) {
+
+         this->arenaIndex++;
+         if (this->arenaIndex >= cst::ArenaPerSpace) return this->complete();
+         this->arena = mem::ArenaMap[this->arenaIndex];
+
+         auto arena = this->arena.descriptor();
+         auto region_size = size_t(1) << arena->segmentation;
+         this->regionCount = arena->availables_count.load(std::memory_order_relaxed);
+         this->regionIndex = 0;
+      }
+
+      auto& regionEntry = this->arena->regions[this->regionIndex];
+      if (regionEntry.IsObjectRegion()) {
+         this->region = ObjectRegion((this->arenaIndex << cst::ArenaSizeL2) + (uintptr_t(this->regionIndex) << this->arena.segmentation));
+         this->layout = this->region->layoutID;
+         this->regionObjects = this->region->GetUsedMap();
+      }
+   }
+
+   this->index = bit::lsb_64(this->regionObjects);
+   this->object = this->region->GetObjectAt(this->index);
+   this->regionObjects ^= uint64_t(1) << this->index;
 }

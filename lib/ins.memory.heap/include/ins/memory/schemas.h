@@ -7,7 +7,7 @@ namespace ins::mem {
    typedef uint32_t ObjectSchemaID;
 
    struct IObjectSchema {
-      virtual const char* name() = 0;
+      virtual const char* GetSchemaName() = 0;
    };
 
    template<typename sSchema = sObjectSchema, typename sData = void>
@@ -31,7 +31,8 @@ namespace ins::mem {
          InvalidateID = 1,
       };
 
-      uint32_t base_size;
+      uint8_t type_id = 0;
+      uint32_t base_size = 0;
       IObjectSchema* infos = 0;
       ObjectTraverser traverser = 0;
       ObjectFinalizer finalizer = 0;
@@ -41,7 +42,7 @@ namespace ins::mem {
    struct ManagedSchema : IObjectSchema {
       ObjectSchemaID id = 0;
       const char* type_name = 0;
-      const char* name() override { return this->type_name; }
+      const char* GetSchemaName() override { return this->type_name; }
       void InstallSchema(const std::type_info& info, size_t size, ObjectTraverser traverser, ObjectFinalizer finalizer);
       size_t size();
    };

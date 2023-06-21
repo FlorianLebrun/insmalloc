@@ -28,6 +28,54 @@ namespace ins::os {
       else return infos.dwAllocationGranularity;
    }
 
+   tProcessWorkingSet GetMemoryWorkingSet() {
+      tProcessWorkingSet stats;
+      DWORD processID = GetCurrentProcessId(); // ID du processus courant
+      PSAPI_WORKING_SET_INFORMATION* pWSI = NULL;
+      DWORD size = 0;
+
+      HANDLE processHandle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processID);
+      if (processHandle == NULL) {
+         throw;
+      }
+      QueryWorkingSet(processHandle, pWSI, size);
+
+      size = sizeof(PSAPI_WORKING_SET_INFORMATION) * 1024 * 128;
+      pWSI = (PSAPI_WORKING_SET_INFORMATION*)malloc(size);
+      if (pWSI == NULL) {
+         CloseHandle(processHandle);
+         throw;
+      }
+
+      if (!QueryWorkingSet(processHandle, pWSI, size)) {
+         free(pWSI);
+         CloseHandle(processHandle);
+         throw;
+      }
+
+      SYSTEM_INFO si;
+      GetSystemInfo(&si);
+      stats.shared_bytes = 0;
+      stats.private_bytes = 0;
+      for (DWORD i = 0; i < pWSI->NumberOfEntries; i++) {
+         if (pWSI->WorkingSetInfo[i].Shared) {
+            stats.shared_bytes += si.dwPageSize;
+         }
+         else {
+            stats.private_bytes += si.dwPageSize;
+         }
+      }
+
+      PROCESS_MEMORY_COUNTERS_EX pmc;
+      if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+         stats.total_bytes = pmc.WorkingSetSize;
+      }
+
+      free(pWSI);
+      CloseHandle(processHandle);
+      return stats;
+   }
+
    tZoneState GetMemoryZoneState(uintptr_t address) {
       MEMORY_BASIC_INFORMATION infos;
       tZoneState region;

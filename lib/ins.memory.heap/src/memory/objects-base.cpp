@@ -114,8 +114,8 @@ void mem::ObjectLocation::RetainWeak() {
 }
 
 bool mem::ObjectLocation::Release(MemoryContext* context) {
-   _ASSERT(this->IsAlive());
    if (!this->object) return false;
+   _ASSERT(this->IsAlive());
 
    // Decremement counter
    auto& tag = (std::atomic_uint8_t&)this->object->hard_retention;
@@ -144,8 +144,8 @@ bool mem::ObjectLocation::Release(MemoryContext* context) {
 }
 
 bool mem::ObjectLocation::ReleaseWeak(MemoryContext* context) {
-   _ASSERT(this->IsAllocated());
    if (!this->object) return false;
+   _ASSERT(this->IsAllocated());
 
    // Decremement counter
    auto& tag = (std::atomic_uint8_t&)this->object->weak_retention;

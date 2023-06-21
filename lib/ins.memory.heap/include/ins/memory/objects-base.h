@@ -155,8 +155,12 @@ namespace ins::mem {
          return bit::bitcount_64(this->GetAvailablesMap());
       }
 
+      uint64_t GetUsedMap() {
+         return this->GetAvailablesMap() ^ cst::ObjectLayoutMask[this->layoutID];
+      }
+
       size_t GetUsedCount() {
-         auto bits = this->GetAvailablesMap() ^ cst::ObjectLayoutMask[this->layoutID];
+         auto bits = this->GetUsedMap();
          return bit::bitcount_64(bits);
       }
 
@@ -278,6 +282,9 @@ namespace ins::mem {
             this->object = 0;
             this->index = 0;
          }
+      }
+      void* Ptr() {
+         return &this->object[1];
       }
    };
 

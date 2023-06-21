@@ -12,11 +12,11 @@ using namespace ins::mem;
 
 
 struct OpaqueSchema : IObjectSchema {
-   const char* name() override { return "<opaque>"; }
+   const char* GetSchemaName() override { return "<opaque>"; }
 };
 
 struct InvalidateSchema : IObjectSchema {
-   const char* name() override { return "<invalid>"; }
+   const char* GetSchemaName() override { return "<invalid>"; }
 };
 
 constexpr uint32_t c_MaxTracker = 128;
@@ -58,7 +58,8 @@ namespace ins::mem {
       StarvedConsumerToken* starved_consumers = 0;
 
       ObjectAnalysisSession cleanup;
-      uint32_t cycle = 0;
+      std::mutex cleanup_running;
+      uint32_t cleanup_cycle = 0;
 
       std::mutex trackers_lock;
       uint16_t trackers_count = 0;
@@ -94,11 +95,12 @@ void mem::SchemaArena::Initialize() {
 
    mem::ObjectSchemas = ObjectSchema(this->GetBase());
 
-   auto opaque_schema = CreateSchema(&this->opaque_schema, 0, 0, 0);
-   if (GetObjectSchemaID(opaque_schema) != sObjectSchema::OpaqueID) throw;
+   ObjectSchema schema = 0;
+   schema = CreateSchema(&this->opaque_schema, 0, 0, 0);
+   if (GetObjectSchemaID(schema) != sObjectSchema::OpaqueID) throw;
 
-   auto invalidate_schema = CreateSchema(&this->invalidate_schema, 0, 0, 0);
-   if (GetObjectSchemaID(invalidate_schema) != sObjectSchema::InvalidateID) throw;
+   schema = CreateSchema(&this->invalidate_schema, 0, 0, 0);
+   if (GetObjectSchemaID(schema) != sObjectSchema::InvalidateID) throw;
 }
 
 size_t mem::SchemaArena::GetTableUsedBytes() {
@@ -269,9 +271,9 @@ void mem::PerformHeapCleanup() {
 }
 
 void mem::MarkAndSweepUnusedObjects() {
-   if (ObjectAnalysisSession::running.try_lock()) {
+   if (controller->cleanup_running.try_lock()) {
       _ASSERT(!ObjectAnalysisSession::enabled);
-      controller->cycle++;
+      controller->cleanup_cycle++;
 
       // Run objects aliveness analysis
       controller->MarkUsedObjects();
@@ -279,7 +281,7 @@ void mem::MarkAndSweepUnusedObjects() {
       // Sweep unused objects
       controller->SweepUnusedObjects();
 
-      ObjectAnalysisSession::running.unlock();
+      controller->cleanup_running.unlock();
    }
 }
 

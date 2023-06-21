@@ -1,6 +1,7 @@
 #pragma once
 #include <ins/memory/descriptors.h>
 #include <ins/os/memory.h>
+#include <ins/avl/AVLOperators.h>
 
 namespace ins::mem {
 
